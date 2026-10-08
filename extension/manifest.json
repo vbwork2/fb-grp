@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Groupflow Posting Assistant",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Prepare Facebook Group posts with images; you review and click Post to continue each group.",
   "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' data: blob:;" },
   "permissions": ["storage", "tabs", "clipboardWrite", "alarms"],

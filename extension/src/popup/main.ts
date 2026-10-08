@@ -7,6 +7,7 @@ type Campaign = { id: string; name: string; status: string; groupCount: number; 
 
 const byId = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const statusMessage = byId<HTMLDivElement>("status");
+byId<HTMLElement>("extensionVersion").textContent = "v" + chrome.runtime.getManifest().version;
 const setup = byId<HTMLElement>("setup");
 const workflow = byId<HTMLElement>("workflow");
 const groupName = byId<HTMLDivElement>("groupName");

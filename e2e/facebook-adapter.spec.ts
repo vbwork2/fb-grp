@@ -374,3 +374,43 @@ test("cancelling a prepared watcher prevents later submission callbacks", async 
   );
   expect(events.some((event) => event.type === "USER_POST_CLICKED")).toBe(false);
 });
+
+
+test("Facebook Lexical visual blank lines do not block a valid complete caption", async ({ page }) => {
+  await setup(page, '<div role="dialog"><div role="textbox" contenteditable="true"></div><button class="post">Đăng</button></div>');
+  const caption = "🌱 WEBINAR NCKHSV\n\n📍 THÔNG TIN BUỔI WEBINAR\n⏰ 19:00 – 20:00\n\n#NCKHSV";
+  await page.locator("[role='dialog'] [role='textbox']").evaluate((node) => {
+    // Facebook's Lexical renderer can expose an extra paragraph separator
+    // via innerText even when the underlying characters and breaks are right.
+    // The previous validator required byte-exact innerText equality.
+    Object.defineProperty(node, "innerText", {
+      configurable: true,
+      get() {
+        return "🌱 WEBINAR NCKHSV\n\n\n📍 THÔNG TIN BUỔI WEBINAR\n\n⏰ 19:00 – 20:00\n\n\n#NCKHSV";
+      },
+    });
+  });
+  const result = await send(page, { type: "PREPARE_CAPTION", ...job, caption, linkUrl: null });
+  expect(result).toMatchObject({ ok: true, clicked: false });
+  // The assisted workflow must not click the Facebook Post button.
+  expect(await page.evaluate(() => (window as unknown as { finalPostClicks: number }).finalPostClicks)).toBe(0);
+  await expect(page.locator("[role='dialog'] [role='textbox']")).toContainText("THÔNG TIN BUỔI WEBINAR");
+});
+
+test("Facebook genuinely flattening a prepared multiline caption pauses safely", async ({ page }) => {
+  await setup(page, '<div role="dialog"><div role="textbox" contenteditable="true"></div><button class="post">Post</button></div>');
+  const caption = "🌱 WEBINAR\n📍 Thông tin\n🏆 Thành tích";
+  await page.locator("[role='dialog'] [role='textbox']").evaluate((node) => {
+    Object.defineProperty(node, "innerText", {
+      configurable: true,
+      get() { return node.textContent ?? ""; },
+    });
+  });
+  // The synthetic DOM returns one visually flattened line even if insertText
+  // put the full caption into nodes containing nonvisual separators.
+  const result = await send(page, { type: "PREPARE_CAPTION", ...job, caption, linkUrl: null });
+  // If execCommand made actual <br> nodes this is a valid layout. If it put
+  // only raw newlines in text, a failure is required.
+  if (!result.ok) expect(result.reason).toBe("CAPTION_FORMAT_INVALID");
+  expect(await page.evaluate(() => (window as unknown as { finalPostClicks: number }).finalPostClicks)).toBe(0);
+});

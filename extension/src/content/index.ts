@@ -103,17 +103,17 @@ function captionText(message: ComposerMessage): string {
     .filter(Boolean).join("\n\n").replace(/\r\n?/g, "\n").replace(/[\u2028\u2029]/g, "\n");
 }
 
-function compareCaption(value: string): string {
-  return value.replace(/\r\n?/g, "\n")
-    .replace(/[\u200b\ufeff]/gi, "").replace(/\u00a0/g, " ")
-    .split("\n").map((line) => line.trimEnd()).join("\n")
-    .replace(/\n+$/, "");
+// Facebook's editor may render a newline as <br>, nested <div>, a
+// Lexical <p>, or even duplicate visual separators. Literal equality with
+// innerText is therefore not reliable. Compare the actual characters
+// independently of layout, then separately verify that the editor has a
+// visually meaningful line break.
+function compactCaption(value: string): string {
+  return value.normalize("NFC").replace(/[\s\u200b\ufeff\u2060]/gu, "");
 }
 
 function editorText(editor: HTMLElement): string {
   if (editor instanceof HTMLTextAreaElement) return editor.value;
-  // Lexical usually renders one <p> for each line. innerText can add a
-  // second newline between <p> blocks; join those blocks ourselves.
   const children = [...editor.children];
   if (children.length && children.every((child) => /^(P|DIV)$/i.test(child.tagName))) {
     return children.map((child) => (child as HTMLElement).innerText.replace(/\n+$/, "")).join("\n");
@@ -121,8 +121,26 @@ function editorText(editor: HTMLElement): string {
   return editor.innerText;
 }
 
+function visibleLineBreaks(editor: HTMLElement): boolean {
+  if (editor instanceof HTMLTextAreaElement) return /\n/.test(editor.value);
+  if (/\n/.test(editorText(editor))) return true;
+  // Some rich editors expose paragraph boundaries in the DOM but do not
+  // include them in innerText until they have been reconciled.
+  const blocks = [...editor.querySelectorAll("p, div")].filter((node) =>
+    node.closest("[contenteditable='true']") === editor
+  );
+  return blocks.length > 1 || Boolean(editor.querySelector("br"));
+}
+
 function captionMatches(editor: HTMLElement, text: string): boolean {
-  return compareCaption(editorText(editor)) === compareCaption(text);
+  const typed = editor instanceof HTMLTextAreaElement
+    ? editor.value
+    : editor.textContent ?? "";
+  if (!compactCaption(typed) || compactCaption(typed) !== compactCaption(text)) return false;
+  // A missed or extra paragraph separator must not cause a false rejection
+  // when the whole caption is intact and line breaks remain visible. Users
+  // still review the formatted post before clicking Facebook's Post button.
+  return !text.includes("\n") || visibleLineBreaks(editor);
 }
 
 async function fill(editor: HTMLElement, message: ComposerMessage): Promise<boolean> {
@@ -144,19 +162,21 @@ async function fill(editor: HTMLElement, message: ComposerMessage): Promise<bool
       if (lines[i] && !document.execCommand("insertText", false, lines[i])) return false;
     }
   }
-  // Give controlled React/Lexical editors a moment to reconcile DOM changes.
-  await new Promise((resolve) => window.setTimeout(resolve, 120));
-  const valid = captionMatches(editor, text);
+  // Facebook can reconcile its Lexical state asynchronously. Wait for a
+  // stable-looking result instead of declaring failure after a fixed 120 ms.
+  const valid = await waitFor(() => captionMatches(editor, text) ? true : undefined, 1800);
   if (valid && message.jobId) preparedJob = { id: message.jobId, editor };
-  return valid;
+  return Boolean(valid);
 }
 
 function lostCaptionLineBreaks(editor: HTMLElement, message: ComposerMessage): boolean {
-  const intended = compareCaption(captionText(message));
-  const rendered = compareCaption(editorText(editor));
-  return intended.includes("\n")
-    && intended.replace(/\n/g, "") === rendered.replace(/\n/g, "")
-    && intended !== rendered;
+  const intended = captionText(message);
+  if (!intended.includes("\n") || visibleLineBreaks(editor)) return false;
+  // This is a *definite* collapse: the same caption characters are present
+  // without any rendered line break. Do not block a human-edited caption
+  // merely because Facebook normalized spaces/paragraph boundaries.
+  const actual = editor instanceof HTMLTextAreaElement ? editor.value : editor.textContent ?? "";
+  return compactCaption(actual) === compactCaption(intended);
 }
 
 async function waitFor<T>(read: () => T | undefined, milliseconds: number): Promise<T | undefined> {
