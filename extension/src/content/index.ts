@@ -384,6 +384,13 @@ function armUserPost(message: ComposerMessage): AdapterResult {
 
 chrome.runtime.onMessage.addListener((message: ComposerMessage, _sender, sendResponse) => {
   if (message.type === "PING") { sendResponse({ ok: true }); return; }
+  if (message.type === "RESET_SAFE_JOB") {
+    if (!message.jobId || attemptedJobs.has(message.jobId)) {
+      sendResponse({ ok: false }); return;
+    }
+    cancelledJobs.delete(message.jobId);
+    sendResponse({ ok: true }); return;
+  }
   if (message.type === "AUTO_PROGRESS") { renderProgress(message); sendResponse({ ok: true }); return; }
   if (message.type === "ARM_USER_POST") { sendResponse(armUserPost(message)); return; }
   if (message.type === "CANCEL_JOB" && message.jobId) {
