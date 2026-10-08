@@ -2,6 +2,8 @@ import { translate, type Locale } from "../../../src/lib/i18n";
 export {};
 
 type Job = { id: string; publishAttempted?: boolean; campaign: string; group: { name: string; url: string }; content: { caption: string; linkUrl: string | null; media: { id: string; filename: string; mimeType: string }[] } };
+type AutomaticRun = { runId: string; campaignId: string; enabled: boolean; status: string; error?: string; attempts: number; tabId?: number; groupName?: string; phase: "WAITING" | "OPENING" | "PREPARING" | "SUBMITTING" | "PAUSED" };
+type Campaign = { id: string; name: string; status: string; groupCount: number };
 
 const byId = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const statusMessage = byId<HTMLDivElement>("status");
@@ -14,55 +16,118 @@ const mediaPanel = byId<HTMLDivElement>("media");
 const apiUrl = byId<HTMLInputElement>("apiUrl");
 const code = byId<HTMLInputElement>("code");
 
-let locale: Locale = "en";
+let locale: Locale = "vi";
 let currentJob: Job | undefined;
 let currentConnected = false;
 let currentStatus = "";
-type AutomaticRun = { enabled: boolean; status: string; error?: string; attempts: number };
 let currentAutomatic: AutomaticRun | undefined;
-const t = (text: string) => translate(text, locale);
-function setStatus(text: string) { currentStatus = text; statusMessage.textContent = t(text); }
+let campaigns: Campaign[] = [];
+let sending = false;
+const t = (value: string) => translate(value, locale);
+
+function setStatus(value: string) {
+  currentStatus = value;
+  statusMessage.textContent = t(value);
+}
+
 function renderLanguage() {
   document.documentElement.lang = locale;
   document.querySelectorAll<HTMLElement>("[data-i18n]").forEach((element) => { element.textContent = t(element.dataset.i18n ?? ""); });
-  byId<HTMLLabelElement>("languageLabel").textContent = locale === "vi" ? "Ngôn ngữ" : "Language";
   byId<HTMLSelectElement>("language").value = locale;
   statusMessage.textContent = t(currentStatus);
   renderAutomatic();
 }
+
 function showJob(job?: Job, connected = Boolean(job)) {
-  currentJob = job; currentConnected = connected;
+  currentJob = job;
+  currentConnected = connected;
   setup.classList.toggle("hidden", connected);
   workflow.classList.toggle("hidden", !connected);
+  byId<HTMLButtonElement>("disconnect").classList.toggle("hidden", !connected);
   for (const id of ["open", "prepare", "copy", "publish", "posted", "skip", "failed"]) byId<HTMLButtonElement>(id).classList.toggle("hidden", !job);
   byId("imageConfirmation").classList.toggle("hidden", !job?.content.media.length);
   byId<HTMLInputElement>("imagesAttached").checked = false;
-  byId<HTMLButtonElement>("publish").disabled = Boolean(job?.publishAttempted);
-  if (!job) { groupName.textContent = t("No active job"); groupInfo.textContent = t("Request the next available group from your queue."); caption.classList.add("hidden"); mediaPanel.replaceChildren(); return; }
-  groupName.textContent = job.group.name;
-  groupInfo.textContent = job.campaign;
-  caption.textContent = [job.content.caption, job.content.linkUrl ?? ""].filter(Boolean).join("\n\n");
-  caption.classList.remove("hidden");
-  mediaPanel.replaceChildren(...job.content.media.map((file) => {
-    const button = document.createElement("button"); button.textContent = t(`View ${file.filename}`);
-    button.onclick = () => void chrome.runtime.sendMessage({ type: "MEDIA", mediaId: file.id }).then((result: { ok: boolean; dataUrl?: string; error?: string }) => {
-      if (!result.ok || !result.dataUrl) { setStatus(result.error ?? "Unable to load image."); return; }
-      const preview = document.createElement("img"); preview.src = result.dataUrl; preview.alt = file.filename; preview.style.maxWidth = "100%"; preview.style.maxHeight = "180px"; preview.style.objectFit = "contain"; preview.style.background = "white"; preview.style.borderRadius = "6px"; mediaPanel.replaceChildren(preview);
-    });
-    return button;
-  }));
-  byId<HTMLButtonElement>("open").onclick = () => { void chrome.tabs.create({ url: job.group.url }); };
-  byId<HTMLButtonElement>("copy").onclick = async () => { await navigator.clipboard.writeText(caption.textContent ?? ""); setStatus("Caption copied."); };
-  byId<HTMLButtonElement>("prepare").onclick = () => void send({ type: "PREPARE" });
-  byId<HTMLButtonElement>("publish").onclick = () => void send({ type: "PUBLISH", jobId: job.id, mediaConfirmed: byId<HTMLInputElement>("imagesAttached").checked });
-  byId<HTMLButtonElement>("posted").onclick = () => void send({ type: "POSTED" }, true);
-  byId<HTMLButtonElement>("skip").onclick = () => void send({ type: "SKIP" }, true);
-  byId<HTMLButtonElement>("failed").onclick = () => void send({ type: "FAILED" }, true);
+  if (!job) {
+    groupName.textContent = t("No active job");
+    groupInfo.textContent = t("Request the next available group from your queue.");
+    caption.classList.add("hidden");
+    mediaPanel.replaceChildren();
+  } else {
+    groupName.textContent = job.group.name;
+    groupInfo.textContent = job.campaign;
+    caption.textContent = [job.content.caption, job.content.linkUrl ?? ""].filter(Boolean).join("\n\n");
+    caption.classList.remove("hidden");
+    mediaPanel.replaceChildren(...job.content.media.map((file) => {
+      const button = document.createElement("button");
+      button.textContent = t(`View ${file.filename}`);
+      button.onclick = () => void chrome.runtime.sendMessage({ type: "MEDIA", mediaId: file.id })
+        .then((result: { ok: boolean; dataUrl?: string; error?: string }) => {
+          if (!result.ok || !result.dataUrl) { setStatus(result.error ?? "Unable to load image."); return; }
+          const preview = document.createElement("img");
+          preview.src = result.dataUrl;
+          preview.alt = file.filename;
+          preview.style.cssText = "max-width:100%;max-height:180px;object-fit:contain;background:#fff;border-radius:6px";
+          mediaPanel.replaceChildren(preview);
+        }).catch(() => setStatus("Unable to load image."));
+      return button;
+    }));
+    byId<HTMLButtonElement>("open").onclick = () => { void chrome.tabs.create({ url: job.group.url }); };
+    byId<HTMLButtonElement>("copy").onclick = async () => { await navigator.clipboard.writeText(caption.textContent ?? ""); setStatus("Caption copied."); };
+    byId<HTMLButtonElement>("prepare").onclick = () => void send({ type: "PREPARE" });
+    byId<HTMLButtonElement>("publish").onclick = () => void send({ type: "PUBLISH", jobId: job.id, mediaConfirmed: byId<HTMLInputElement>("imagesAttached").checked });
+    byId<HTMLButtonElement>("posted").onclick = () => void send({ type: "POSTED" }, true);
+    byId<HTMLButtonElement>("skip").onclick = () => void send({ type: "SKIP" }, true);
+    byId<HTMLButtonElement>("failed").onclick = () => void send({ type: "FAILED" }, true);
+  }
+  renderAutomatic();
+}
+
+function renderAutomatic() {
+  const run = currentAutomatic;
+  const running = Boolean(run?.enabled);
+  const paused = Boolean(run && !run.enabled && run.phase === "PAUSED");
+  const failed = Boolean(paused && run?.error);
+  const select = byId<HTMLSelectElement>("autoCampaign");
+  const selectedCampaign = campaigns.find((item) => item.id === select.value);
+  byId<HTMLElement>("campaignHint").textContent = selectedCampaign
+    ? `${selectedCampaign.groupCount} ${t("selected groups")} · ${t(selectedCampaign.status)}`
+    : t("Each run can post to up to 3 groups.");
+  byId<HTMLButtonElement>("autoStart").disabled = sending || running || !select.value || Boolean(currentJob?.publishAttempted);
+  byId<HTMLButtonElement>("autoStop").disabled = sending || !running;
+  byId<HTMLButtonElement>("autoRetry").classList.toggle("hidden", !failed || Boolean(currentJob?.publishAttempted));
+  byId<HTMLButtonElement>("autoRetry").disabled = sending;
+  byId<HTMLButtonElement>("autoRefresh").disabled = sending || running;
+  select.disabled = running || sending;
+  const state = byId<HTMLElement>("autoState");
+  state.classList.toggle("running", running);
+  state.classList.toggle("error", failed);
+  byId<HTMLElement>("autoStateLabel").textContent = running ? t("RUNNING") : failed ? t("NEEDS ATTENTION") : t("READY");
+  const title = !run ? "Ready to post" : failed ? "Posting paused — action needed" : running
+    ? run.phase === "OPENING" ? "Opening Facebook Group"
+      : run.phase === "PREPARING" ? "Preparing the post"
+        : run.phase === "SUBMITTING" ? "Submitting and verifying"
+          : "Waiting for scheduled post"
+    : run.status === "Automatic posting completed." ? "Posting completed" : "Posting stopped";
+  byId<HTMLElement>("autoStatusTitle").textContent = t(title);
+  const details = run ? [run.groupName, run.error || run.status, `${t("Attempts")}: ${run.attempts}/3`].filter(Boolean).map((value) => t(String(value))).join(" · ") : t("Choose a campaign and press Start posting.");
+  byId<HTMLElement>("automaticStatus").textContent = details;
+  const step = running ? run!.phase === "OPENING" ? 1 : run!.phase === "PREPARING" ? 2 : run!.phase === "SUBMITTING" ? 3 : 0 : 0;
+  for (let index = 1; index <= 3; index++) {
+    const element = byId<HTMLElement>(`autoStep${index}`);
+    element.classList.toggle("active", step === index);
+    element.classList.toggle("done", step > index);
+  }
+  byId<HTMLButtonElement>("autoOpen").classList.toggle("hidden", !run?.tabId);
+  for (const id of ["next", "prepare", "publish", "posted", "skip", "failed", "disconnect"]) {
+    byId<HTMLButtonElement>(id).disabled = running || sending || (["next", "publish"].includes(id) && Boolean(currentJob?.publishAttempted));
+  }
 }
 
 async function send(message: { type: string; apiUrl?: string; code?: string; jobId?: string; mediaConfirmed?: boolean; campaignId?: string }, clear = false) {
-  setStatus("");
-  if (message.type === "PUBLISH") byId<HTMLButtonElement>("publish").disabled = true;
+  if (sending) return;
+  sending = true;
+  setStatus(message.type === "AUTO_START" ? "Starting automation…" : "");
+  if (message.type === "AUTO_START" || message.type === "AUTO_STOP") renderAutomatic();
   try {
     const result = await chrome.runtime.sendMessage(message) as { ok: boolean; message?: string; error?: string; job?: Job | null };
     if (!result.ok) throw new Error(result.error ?? "Request failed.");
@@ -70,69 +135,81 @@ async function send(message: { type: string; apiUrl?: string; code?: string; job
     if (message.type === "NEXT") showJob(result.job ?? undefined, true);
     if (message.type === "PUBLISH") setStatus(result.message ?? "Publish was sent to Facebook. Check the result, then confirm it in history.");
     if (clear) { showJob(undefined, true); setStatus(message.type === "POSTED" ? "Post confirmed in history." : message.type === "SKIP" ? "Group skipped." : "Issue recorded in history."); }
+    if (message.type === "AUTO_START" || message.type === "AUTO_STOP") {
+      const saved = await chrome.storage.local.get("automatic");
+      currentAutomatic = saved.automatic as AutomaticRun | undefined;
+      setStatus("");
+    }
   } catch (cause) {
     const saved = await chrome.storage.local.get("deviceToken");
     if (!saved.deviceToken) showJob(undefined, false);
     setStatus(cause instanceof Error ? cause.message : "Request failed.");
   } finally {
+    sending = false;
     if (message.type === "PUBLISH") {
       const saved = await chrome.storage.local.get("job");
       if (saved.job) currentJob = saved.job as Job;
-      byId<HTMLButtonElement>("publish").disabled = Boolean((saved.job as Job | undefined)?.publishAttempted);
     }
+    renderAutomatic();
+  }
+}
+
+async function refreshCampaigns() {
+  try {
+    const result = await chrome.runtime.sendMessage({ type: "AUTO_CAMPAIGNS" }) as { ok: boolean; error?: string; items?: Campaign[] };
+    if (!result.ok) throw new Error(result.error ?? "Request failed.");
+    campaigns = result.items ?? [];
+    const select = byId<HTMLSelectElement>("autoCampaign");
+    const selected = currentAutomatic?.enabled ? currentAutomatic.campaignId : select.value || currentAutomatic?.campaignId;
+    select.replaceChildren(...(campaigns.length ? campaigns.map((campaign) => {
+      const option = document.createElement("option");
+      option.value = campaign.id;
+      option.textContent = `${campaign.name} (${campaign.groupCount})`;
+      return option;
+    }) : [(() => {
+      const option = document.createElement("option"); option.value = ""; option.textContent = t("No campaigns available"); return option;
+    })()]));
+    if ([...select.options].some((option) => option.value === selected)) select.value = selected!;
+    renderAutomatic();
+  } catch (cause) {
+    setStatus(cause instanceof Error ? cause.message : "Request failed.");
   }
 }
 
 void chrome.storage.local.get(["apiUrl", "deviceToken", "job", "locale", "automatic"]).then((saved) => {
-  locale = saved.locale === "vi" ? "vi" : "en";
-  renderLanguage();
+  locale = saved.locale === "en" ? "en" : "vi";
   apiUrl.value = String(saved.apiUrl ?? "");
-  setup.classList.toggle("hidden", Boolean(saved.deviceToken));
-  workflow.classList.toggle("hidden", !saved.deviceToken);
-  showJob(saved.job as Job | undefined, Boolean(saved.deviceToken));
   currentAutomatic = saved.automatic as AutomaticRun | undefined;
-  renderAutomatic();
+  showJob(saved.job as Job | undefined, Boolean(saved.deviceToken));
+  renderLanguage();
   if (saved.deviceToken) void refreshCampaigns();
 });
 
 byId<HTMLButtonElement>("pair").onclick = () => void send({ type: "PAIR", apiUrl: apiUrl.value, code: code.value });
 byId<HTMLButtonElement>("next").onclick = () => void send({ type: "NEXT" });
-byId<HTMLButtonElement>("disconnect").onclick = () => void send({ type: "DISCONNECT" }).then(() => { setStatus("Device disconnected from this browser."); showJob(undefined, false); });
-
+byId<HTMLButtonElement>("disconnect").onclick = () => void send({ type: "DISCONNECT" }).then(() => { showJob(undefined, false); setStatus("Device disconnected from this browser."); });
 byId<HTMLSelectElement>("language").onchange = async (event) => {
-  locale = (event.target as HTMLSelectElement).value === "vi" ? "vi" : "en";
+  locale = (event.target as HTMLSelectElement).value === "en" ? "en" : "vi";
   await chrome.storage.local.set({ locale });
   renderLanguage();
   showJob(currentJob, currentConnected);
-  renderAutomatic();
+  await refreshCampaigns();
 };
-
-
-function renderAutomatic() {
-  const running = Boolean(currentAutomatic?.enabled);
-  byId<HTMLButtonElement>("autoStart").disabled = running || !byId<HTMLSelectElement>("autoCampaign").value;
-  byId<HTMLButtonElement>("autoStop").disabled = !running;
-  byId<HTMLSelectElement>("autoCampaign").disabled = running;
-  byId("automaticStatus").textContent = currentAutomatic ? [t(currentAutomatic.status), currentAutomatic.error ? t(currentAutomatic.error) : ""].filter(Boolean).join(" ") : "";
-  for (const id of ["next", "prepare", "publish", "posted", "skip", "failed", "disconnect"]) byId<HTMLButtonElement>(id).disabled = running || (["next", "publish"].includes(id) && Boolean(currentJob?.publishAttempted));
-}
-
-async function refreshCampaigns() {
-  const result = await chrome.runtime.sendMessage({ type: "AUTO_CAMPAIGNS" }) as { ok: boolean; error?: string; items?: { id: string; name: string; status: string }[] };
-  if (!result.ok) { setStatus(result.error ?? "Request failed."); return; }
-  const select = byId<HTMLSelectElement>("autoCampaign");
-  const selected = select.value;
-  select.replaceChildren(...(result.items ?? []).map((campaign) => {
-    const option = document.createElement("option"); option.value = campaign.id; option.textContent = campaign.name; return option;
-  }));
-  if ([...select.options].some((option) => option.value === selected)) select.value = selected;
-  renderAutomatic();
-}
-
 byId<HTMLSelectElement>("autoCampaign").onchange = () => renderAutomatic();
 byId<HTMLButtonElement>("autoRefresh").onclick = () => void refreshCampaigns();
 byId<HTMLButtonElement>("autoStart").onclick = () => void send({ type: "AUTO_START", campaignId: byId<HTMLSelectElement>("autoCampaign").value });
 byId<HTMLButtonElement>("autoStop").onclick = () => void send({ type: "AUTO_STOP" });
+byId<HTMLButtonElement>("autoRetry").onclick = () => void send({ type: "AUTO_START", campaignId: currentAutomatic?.campaignId });
+byId<HTMLButtonElement>("autoOpen").onclick = async () => {
+  try {
+    const tabId = currentAutomatic?.tabId;
+    if (!tabId) return;
+    const tab = await chrome.tabs.get(tabId);
+    if (!tab.windowId) return;
+    await chrome.windows.update(tab.windowId, { focused: true });
+    await chrome.tabs.update(tabId, { active: true });
+  } catch { setStatus("The Facebook Group could not be opened."); }
+};
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
   if (changes.automatic) currentAutomatic = changes.automatic.newValue as AutomaticRun | undefined;
