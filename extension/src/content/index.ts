@@ -1,6 +1,6 @@
 export {};
 
-type ComposerMessage = { type?: string; jobId?: string; expectedGroupUrl?: string; caption?: string; linkUrl?: string; attachments?: { id: string; filename: string; mimeType: string; dataUrl: string }[]; trackOutcome?: boolean };
+type ComposerMessage = { type?: string; jobId?: string; expectedGroupUrl?: string; caption?: string; linkUrl?: string; attachments?: { id: string; filename: string; mimeType: string; dataUrl: string }[]; trackOutcome?: boolean; phase?: string; status?: string; error?: string; enabled?: boolean };
 type AdapterResult = { ok: boolean; clicked?: boolean; reason?: string; message?: string; outcome?: "published" | "approval" | "unknown" };
 const attemptedJobs = new Set<string>();
 const cancelledJobs = new Set<string>();
@@ -179,7 +179,39 @@ async function handle(message: ComposerMessage): Promise<AdapterResult> {
   return { ok: true, clicked: true, message: "Publish was sent to Facebook. Check the result, then confirm it in history." };
 }
 
+// A small, read-only on-page indicator survives the popup closing when Chrome
+// switches to the Facebook tab. Never label it as a Facebook notification.
+const PROGRESS_ID = "groupflow-progress-indicator";
+function renderProgress(message: ComposerMessage): void {
+  document.getElementById(PROGRESS_ID)?.remove();
+  if (!message.enabled && !message.error) return;
+  if (!document.body) return;
+  const panel = document.createElement("div");
+  panel.id = PROGRESS_ID;
+  panel.style.cssText = "position:fixed;bottom:18px;left:18px;z-index:2147483640;max-width:310px;background:#fff;color:#17372e;padding:12px 14px;border-radius:12px;box-shadow:0 5px 28px #0003;border-left:4px solid #176c50;font:13px/1.5 system-ui,sans-serif;pointer-events:none";
+  if (message.error) panel.style.borderLeftColor = "#ba5130";
+  const title = document.createElement("div");
+  title.style.cssText = "font-weight:800;margin-bottom:4px";
+  const names: Record<string, string> = {
+    OPENING: "Đang mở nhóm Facebook",
+    PREPARING: "Đang tìm ô viết bài và điền nội dung",
+    SUBMITTING: "Đang đăng và xác nhận kết quả",
+    WAITING: "Đang chờ lịch đăng tiếp theo",
+    PAUSED: "Đã tạm dừng — cần kiểm tra"
+  };
+  title.textContent = "Groupflow · " + (names[message.phase ?? ""] ?? "Đăng bài tự động");
+  const info = document.createElement("div");
+  info.style.cssText = "font-size:12px;color:#52675c;overflow-wrap:anywhere";
+  info.textContent = message.error
+    ? "Không thể tiếp tục. Mở tiện ích Groupflow để xem lỗi và xử lý. Không tự đăng lại bài chưa rõ kết quả."
+    : (message.phase === "PREPARING" ? "Nếu không thấy ô soạn bài, hãy mở tiện ích để xem hướng dẫn." : "Mở tiện ích Groupflow để theo dõi chi tiết.");
+  panel.append(title, info);
+  document.body.append(panel);
+}
+
 chrome.runtime.onMessage.addListener((message: ComposerMessage, _sender, sendResponse) => {
+  if (message.type === "PING") { sendResponse({ ok: true }); return; }
+  if (message.type === "AUTO_PROGRESS") { renderProgress(message); sendResponse({ ok: true }); return; }
   if (message.type === "CANCEL_JOB" && message.jobId) { cancelledJobs.add(message.jobId); sendResponse({ ok: true }); return; }
   if (message.type !== "PREPARE_CAPTION" && message.type !== "PUBLISH_POST") return;
   void handle(message).then(sendResponse).catch(() => sendResponse({ ok: false, clicked: message.jobId ? attemptedJobs.has(message.jobId) : false, message: "The Facebook action could not be completed. Check Facebook before trying again." }));
