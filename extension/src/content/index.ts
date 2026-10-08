@@ -34,9 +34,9 @@ function openComposerEditor(): HTMLElement | undefined {
   const dialogs = [...document.querySelectorAll<HTMLElement>("[role='dialog']")].filter(visible);
   const candidates = dialogs.flatMap((dialog) => editorCandidates(dialog));
   if (candidates.length === 1) return candidates[0];
-  if (candidates.length > 1) return undefined;
-  const formEditors = editorCandidates().filter((editor) => Boolean(editor.closest("form")));
-  return formEditors.length === 1 ? formEditors[0] : undefined;
+  // Group comment fields may also live inside forms. Do not ever treat
+  // a non-dialog form as the Facebook post composer.
+  return undefined;
 }
 
 const INLINE_COMPOSER_TEXT = /^(?:bạn viết gì đi|viết gì đó|write something|what['’]s on your mind|bạn đang nghĩ gì)(?:$|[\s.,!?…])/i;
@@ -129,13 +129,27 @@ async function uploadImages(scope: Element, message: ComposerMessage): Promise<b
   const attached = uploadedFiles.get(message.jobId) ?? new Set<string>();
   const pending = message.attachments.filter((file) => !attached.has(file.id));
   if (!pending.length) return true;
-  const inputs = () => [...scope.querySelectorAll<HTMLInputElement>("input[type='file']")].filter((input) => /image|\.jpg|\.png|\.webp/i.test(input.accept));
-  if (!inputs().length) {
-    const triggers = [...scope.querySelectorAll<HTMLElement>("button,[role='button']")].filter((element) => visible(element) && /^(photo\/video|photos\/videos|ảnh\/video)$/i.test((element.getAttribute("aria-label") ?? element.innerText).trim()));
+  const inputs = (root: ParentNode) => [...root.querySelectorAll<HTMLInputElement>("input[type='file']")]
+    .filter((input) => /image|\.jpg|\.jpeg|\.png|\.webp/i.test(input.accept));
+  let openedPhoto = false;
+  if (!inputs(scope).length) {
+    const triggers = [...scope.querySelectorAll<HTMLElement>("button,[role='button']")].filter((element) =>
+      visible(element) && /^(photo\/video|photos\/videos|ảnh\/video|ảnh và video|photo\/videos)$/i.test(labelOf(element))
+    );
     if (triggers.length !== 1) return false;
     triggers[0].click();
+    openedPhoto = true;
   }
-  const input = await waitFor(() => { const found = inputs(); return found.length === 1 ? found[0] : undefined; }, 4000);
+  const input = await waitFor(() => {
+    const scoped = inputs(scope);
+    if (scoped.length === 1) return scoped[0];
+    if (scoped.length > 1 || !openedPhoto) return undefined;
+    // Some Facebook layouts insert the picker input in a portal outside
+    // the dialog. Only use it if opening Photo/video revealed one unique
+    // image picker on the entire page.
+    const global = inputs(document);
+    return global.length === 1 ? global[0] : undefined;
+  }, 6000);
   if (!input || (!input.multiple && pending.length > 1) || cancelled(message)) return false;
   const transfer = new DataTransfer();
   for (const file of pending) {
