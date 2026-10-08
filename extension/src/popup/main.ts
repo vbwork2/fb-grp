@@ -94,14 +94,14 @@ function renderAutomatic() {
     : t("Posts are prepared one group at a time. You click Post on Facebook.");
   byId<HTMLButtonElement>("autoStart").disabled = sending || running || !select.value || Boolean(currentJob?.publishAttempted);
   byId<HTMLButtonElement>("autoStop").disabled = sending || !running;
-  byId<HTMLButtonElement>("autoRetry").classList.toggle("hidden", !failed || Boolean(currentJob?.publishAttempted));
+  byId<HTMLButtonElement>("autoRetry").classList.toggle("hidden", !failed || Boolean(currentJob?.publishAttempted) || Boolean(selectedCampaign?.failedCount));
   byId<HTMLButtonElement>("autoRetry").disabled = sending;
   const postPending = Boolean(currentJob?.publishAttempted && run &&
     currentJob && ["AWAITING_USER", "VERIFYING", "PAUSED"].includes(run.phase));
   byId<HTMLButtonElement>("autoConfirm").classList.toggle("hidden", !postPending);
   byId<HTMLButtonElement>("autoConfirm").disabled = sending;
   const failedGroups = selectedCampaign?.failedCount ?? 0;
-  byId<HTMLButtonElement>("autoReset").classList.toggle("hidden", !run || !failedGroups || running);
+  byId<HTMLButtonElement>("autoReset").classList.toggle("hidden", !run || selectedCampaign?.id !== run.campaignId || !failedGroups || running);
   byId<HTMLButtonElement>("autoReset").disabled = sending;
   const canCancel = Boolean(run?.campaignId && !["Campaign cancelled.", "Automatic posting completed."].includes(run.status));
   byId<HTMLButtonElement>("autoCancel").classList.toggle("hidden", !canCancel);
