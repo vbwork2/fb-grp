@@ -2,7 +2,7 @@ import { startCampaign } from "@/lib/services/start-campaign";
 import { and, asc, count, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { campaigns, campaignGroups } from "@/lib/db/schema";
+import { campaigns, campaignGroups, queueItems } from "@/lib/db/schema";
 import { getDevice } from "@/lib/auth/device";
 import { jsonError, jsonSuccess } from "@/lib/security/http";
 
@@ -13,7 +13,13 @@ export async function GET(request: Request) {
     .innerJoin(campaignGroups, eq(campaignGroups.campaignId, campaigns.id))
     .where(and(eq(campaigns.workspaceId, device.workspaceId), inArray(campaigns.status, ["READY", "RUNNING", "PAUSED"])))
     .groupBy(campaigns.id).orderBy(asc(campaigns.name));
-  return jsonSuccess({ items: items.filter((item) => item.groupCount > 0) });
+  const failed = await db.select({ campaignId: queueItems.campaignId, total: count() }).from(queueItems)
+    .where(and(eq(queueItems.workspaceId, device.workspaceId), eq(queueItems.status, "FAILED")))
+    .groupBy(queueItems.campaignId);
+  const failedByCampaign = new Map(failed.map((item) => [item.campaignId, item.total]));
+  return jsonSuccess({ items: items.filter((item) => item.groupCount > 0).map((item) => ({
+    ...item, failedCount: failedByCampaign.get(item.id) ?? 0,
+  })) });
 }
 
 export async function POST(request: Request) {
