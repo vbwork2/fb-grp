@@ -20,27 +20,45 @@ function groupPath(value: string): string | undefined {
   } catch { return; }
 }
 
-function editorCandidates(): HTMLElement[] {
-  return [...document.querySelectorAll<HTMLElement>("div[contenteditable='true'][role='textbox'], div[contenteditable='true'][data-lexical-editor='true'], textarea[name='xhpc_message']")].filter(visible);
+const EDITOR_SELECTOR = "div[contenteditable='true'][role='textbox'], div[contenteditable='true'][data-lexical-editor='true'], textarea[name='xhpc_message']";
+const COMPOSER_TIMEOUT_MS = 10_000;
+
+function editorCandidates(root: ParentNode = document): HTMLElement[] {
+  return [...root.querySelectorAll<HTMLElement>(EDITOR_SELECTOR)].filter(visible);
+}
+
+// Facebook can have unrelated comment editors on the group page. Never fill one
+// of those: the compose editor must be inside a visible dialog or form.
+function openComposerEditor(): HTMLElement | undefined {
+  const dialogs = [...document.querySelectorAll<HTMLElement>("[role='dialog']")].filter(visible);
+  const dialogEditors = dialogs.flatMap((dialog) => editorCandidates(dialog));
+  if (dialogEditors.length === 1) return dialogEditors[0];
+  if (dialogEditors.length > 1) return;
+  const formEditors = editorCandidates().filter((editor) => Boolean(editor.closest("form")));
+  return formEditors.length === 1 ? formEditors[0] : undefined;
+}
+
+function composeTriggers(): HTMLElement[] {
+  // Exact English labels are not sufficient: Facebook localizes and personalizes
+  // them (for example "Bạn viết gì đi, ...?" or "What's on your mind, ...?").
+  const caption = /^(?:write something|what['’]?s on your mind|create (?:a )?post|start (?:a )?discussion|viết gì|viết bài|bạn viết gì|bạn đang nghĩ gì|tạo bài viết|bắt đầu thảo luận|chia sẻ điều gì)(?:$|[\s.,!?…])/i;
+  return [...document.querySelectorAll<HTMLElement>("button, [role='button']")].filter((element) => {
+    if (!visible(element)) return false;
+    const label = (element.getAttribute("aria-label") || element.innerText || "").replace(/\s+/g, " ").trim();
+    return caption.test(label);
+  });
 }
 
 async function composer(): Promise<HTMLElement | undefined> {
-  const editors = editorCandidates();
-  if (editors.length) return editors.length === 1 ? editors[0] : undefined;
-  const names = new Set(["write something...", "write something…", "write something", "viết gì đó...", "viết gì đó…", "bạn viết gì đi...", "bạn viết gì đi…"]);
-  const triggers = [...document.querySelectorAll<HTMLElement>("button, [role='button']")].filter((element) => visible(element) && names.has((element.getAttribute("aria-label") ?? element.innerText).trim().toLowerCase()));
+  const existing = openComposerEditor();
+  if (existing) return existing;
+  const triggers = composeTriggers();
+  // Never guess which trigger to click if the page is ambiguous.
   if (triggers.length !== 1) return;
   triggers[0].click();
-  return new Promise((resolve) => {
-    const timeout = window.setTimeout(() => { observer.disconnect(); resolve(undefined); }, 4000);
-    const observer = new MutationObserver(() => {
-      const found = editorCandidates();
-      if (found.length === 1) { clearTimeout(timeout); observer.disconnect(); resolve(found[0]); }
-    });
-    observer.observe(document.body, { childList: true, subtree: true, attributes: true });
-    const found = editorCandidates();
-    if (found.length === 1) { clearTimeout(timeout); observer.disconnect(); resolve(found[0]); }
-  });
+  // Polling a small set of dialogs avoids a full-page MutationObserver reacting
+  // to Facebook's frequent feed updates and potentially stalling the tab.
+  return waitFor(openComposerEditor, COMPOSER_TIMEOUT_MS);
 }
 
 function fill(editor: HTMLElement, message: ComposerMessage) {
@@ -109,7 +127,7 @@ async function uploadImages(scope: Element, message: ComposerMessage): Promise<b
   return Boolean(await waitFor(() => {
     if (cancelled(message)) return false;
     const previews = [...scope.querySelectorAll<HTMLImageElement>("img")].filter((image) => visible(image) && previousImages.get(image) !== image.src);
-    const post = [...scope.querySelectorAll<HTMLElement>("button,[role='button']")].find((element) => /^(post|đăng)$/i.test((element.getAttribute("aria-label") ?? element.innerText).trim()));
+    const post = [...scope.querySelectorAll<HTMLElement>("button,[role='button']")].find((element) => /^(post|publish|đăng|đăng bài)$/i.test((element.getAttribute("aria-label") ?? element.innerText).trim()));
     return previews.length >= attached.size && post && !post.matches(":disabled,[aria-disabled='true']") && !scope.querySelector("[role='progressbar'],[aria-busy='true']") ? true : undefined;
   }, 30_000));
 }
@@ -147,7 +165,7 @@ async function handle(message: ComposerMessage): Promise<AdapterResult> {
   if (!publish) return { ok: true, clicked: false };
   const text = editor instanceof HTMLTextAreaElement ? editor.value : editor.textContent;
   if (!text?.trim()) return { ok: false, clicked: false, reason: "EMPTY_CAPTION", message: "The Facebook caption is empty. Prepare the caption before publishing." };
-  const buttons = [...scope!.querySelectorAll<HTMLElement>("button, [role='button']")].filter((element) => visible(element) && /^(post|đăng)$/i.test((element.getAttribute("aria-label") ?? element.innerText).trim()));
+  const buttons = [...scope!.querySelectorAll<HTMLElement>("button, [role='button']")].filter((element) => visible(element) && /^(post|publish|đăng|đăng bài)$/i.test((element.getAttribute("aria-label") ?? element.innerText).trim()));
   if (buttons.length !== 1) return { ok: false, clicked: false, reason: "POST_BUTTON_NOT_FOUND", message: "The Facebook Post button could not be identified. Publish directly on Facebook." };
   const button = buttons[0];
   if (button.matches(":disabled, [aria-disabled='true']")) return { ok: false, clicked: false, reason: "POST_BUTTON_DISABLED", message: "Facebook has not enabled the Post button. Finish editing or uploading images first." };
