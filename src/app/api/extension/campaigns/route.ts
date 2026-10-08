@@ -16,7 +16,7 @@ export async function GET(request: Request) {
   const failed = await db.select({ campaignId: queueItems.campaignId, total: count() }).from(queueItems)
     .where(and(eq(queueItems.workspaceId, device.workspaceId), eq(queueItems.status, "FAILED")))
     .groupBy(queueItems.campaignId);
-  const failedByCampaign = new Map(failed.map((item) => [item.campaignId, item.total]));
+  const failedByCampaign = new Map<string, number>(failed.map((item) => [item.campaignId, item.total] as const));
   return jsonSuccess({ items: items.filter((item) => item.groupCount > 0).map((item) => ({
     ...item, failedCount: failedByCampaign.get(item.id) ?? 0,
   })) });
