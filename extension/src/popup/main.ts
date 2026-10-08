@@ -2,8 +2,8 @@ import { translate, type Locale } from "../../../src/lib/i18n";
 export {};
 
 type Job = { id: string; publishAttempted?: boolean; campaign: string; group: { name: string; url: string }; content: { caption: string; linkUrl: string | null; media: { id: string; filename: string; mimeType: string }[] } };
-type AutomaticRun = { runId: string; campaignId: string; enabled: boolean; status: string; error?: string; attempts: number; tabId?: number; groupName?: string; phase: "WAITING" | "OPENING" | "PREPARING" | "SUBMITTING" | "PAUSED" };
-type Campaign = { id: string; name: string; status: string; groupCount: number };
+type AutomaticRun = { runId: string; campaignId: string; enabled: boolean; status: string; error?: string; attempts: number; tabId?: number; groupName?: string; phase: "WAITING" | "OPENING" | "PREPARING" | "AWAITING_USER" | "VERIFYING" | "PAUSED" };
+type Campaign = { id: string; name: string; status: string; groupCount: number; failedCount: number };
 
 const byId = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const statusMessage = byId<HTMLDivElement>("status");
@@ -91,11 +91,21 @@ function renderAutomatic() {
   const selectedCampaign = campaigns.find((item) => item.id === select.value);
   byId<HTMLElement>("campaignHint").textContent = selectedCampaign
     ? `${selectedCampaign.groupCount} ${t("selected groups")} · ${t(selectedCampaign.status)}`
-    : t("Each run can post to up to 3 groups.");
+    : t("Posts are prepared one group at a time. You click Post on Facebook.");
   byId<HTMLButtonElement>("autoStart").disabled = sending || running || !select.value || Boolean(currentJob?.publishAttempted);
   byId<HTMLButtonElement>("autoStop").disabled = sending || !running;
-  byId<HTMLButtonElement>("autoRetry").classList.toggle("hidden", !failed || Boolean(currentJob?.publishAttempted));
+  byId<HTMLButtonElement>("autoRetry").classList.toggle("hidden", !failed || Boolean(currentJob?.publishAttempted) || Boolean(selectedCampaign?.failedCount));
   byId<HTMLButtonElement>("autoRetry").disabled = sending;
+  const postPending = Boolean(currentJob?.publishAttempted && run &&
+    currentJob && ["AWAITING_USER", "VERIFYING", "PAUSED"].includes(run.phase));
+  byId<HTMLButtonElement>("autoConfirm").classList.toggle("hidden", !postPending);
+  byId<HTMLButtonElement>("autoConfirm").disabled = sending;
+  const failedGroups = selectedCampaign?.failedCount ?? 0;
+  byId<HTMLButtonElement>("autoReset").classList.toggle("hidden", !run || selectedCampaign?.id !== run.campaignId || !failedGroups || running);
+  byId<HTMLButtonElement>("autoReset").disabled = sending;
+  const canCancel = Boolean(run?.campaignId && !["Campaign cancelled.", "Automatic posting completed."].includes(run.status));
+  byId<HTMLButtonElement>("autoCancel").classList.toggle("hidden", !canCancel);
+  byId<HTMLButtonElement>("autoCancel").disabled = sending;
   byId<HTMLButtonElement>("autoRefresh").disabled = sending || running;
   select.disabled = running || sending;
   const state = byId<HTMLElement>("autoState");
@@ -105,13 +115,15 @@ function renderAutomatic() {
   const title = !run ? "Ready to post" : failed ? "Posting paused — action needed" : running
     ? run.phase === "OPENING" ? "Opening Facebook Group"
       : run.phase === "PREPARING" ? "Preparing the post"
-        : run.phase === "SUBMITTING" ? "Submitting and verifying"
-          : "Waiting for scheduled post"
+        : run.phase === "AWAITING_USER" ? "Click Post on Facebook"
+          : run.phase === "VERIFYING" ? "Checking Facebook confirmation"
+            : "Waiting for scheduled post"
     : run.status === "Automatic posting completed." ? "Posting completed" : "Posting stopped";
   byId<HTMLElement>("autoStatusTitle").textContent = t(title);
-  const details = run ? [run.groupName, run.error || run.status, `${t("Attempts")}: ${run.attempts}/3`].filter(Boolean).map((value) => t(String(value))).join(" · ") : t("Choose a campaign and press Start posting.");
+  const details = run ? [run.groupName, run.error || run.status, `${t("Prepared")}: ${run.attempts}`].filter(Boolean).map((value) => t(String(value))).join(" · ") : t("Choose a campaign and press Start posting.");
   byId<HTMLElement>("automaticStatus").textContent = details;
-  const step = running ? run!.phase === "OPENING" ? 1 : run!.phase === "PREPARING" ? 2 : run!.phase === "SUBMITTING" ? 3 : 0 : 0;
+  const step = running ? run!.phase === "OPENING" ? 1 : run!.phase === "PREPARING" ? 2 :
+    ["AWAITING_USER", "VERIFYING"].includes(run!.phase) ? 3 : 0 : 0;
   for (let index = 1; index <= 3; index++) {
     const element = byId<HTMLElement>(`autoStep${index}`);
     element.classList.toggle("active", step === index);
@@ -135,10 +147,18 @@ async function send(message: { type: string; apiUrl?: string; code?: string; job
     if (message.type === "NEXT") showJob(result.job ?? undefined, true);
     if (message.type === "PUBLISH") setStatus(result.message ?? "Publish was sent to Facebook. Check the result, then confirm it in history.");
     if (clear) { showJob(undefined, true); setStatus(message.type === "POSTED" ? "Post confirmed in history." : message.type === "SKIP" ? "Group skipped." : "Issue recorded in history."); }
-    if (message.type === "AUTO_START" || message.type === "AUTO_STOP") {
+    if (["AUTO_START", "AUTO_STOP", "AUTO_CANCEL_CAMPAIGN", "AUTO_RESET_FAILED", "AUTO_CONFIRM_POST"].includes(message.type)) {
       const saved = await chrome.storage.local.get("automatic");
       currentAutomatic = saved.automatic as AutomaticRun | undefined;
-      setStatus("");
+      setStatus(message.type === "AUTO_RESET_FAILED"
+        ? `${(result as { reset?: number }).reset ?? 0} ${t("failed groups reset.")}`
+        : "");
+      if (["AUTO_RESET_FAILED", "AUTO_CANCEL_CAMPAIGN", "AUTO_CONFIRM_POST"].includes(message.type)) {
+        await refreshCampaigns();
+        const current = await chrome.storage.local.get("job");
+        currentJob = current.job as Job | undefined;
+        showJob(currentJob, currentConnected);
+      }
     }
   } catch (cause) {
     const saved = await chrome.storage.local.get("deviceToken");
@@ -199,6 +219,17 @@ byId<HTMLSelectElement>("autoCampaign").onchange = () => renderAutomatic();
 byId<HTMLButtonElement>("autoRefresh").onclick = () => void refreshCampaigns();
 byId<HTMLButtonElement>("autoStart").onclick = () => void send({ type: "AUTO_START", campaignId: byId<HTMLSelectElement>("autoCampaign").value });
 byId<HTMLButtonElement>("autoStop").onclick = () => void send({ type: "AUTO_STOP" });
+byId<HTMLButtonElement>("autoCancel").onclick = () => {
+  if (window.confirm(t("Cancel this campaign? Unposted groups will not continue."))) void send({ type: "AUTO_CANCEL_CAMPAIGN" });
+};
+byId<HTMLButtonElement>("autoReset").onclick = () => {
+  if (window.confirm(t("Reset failed groups? Only confirmed failures are reset; uncertain posts stay locked.")))
+    void send({ type: "AUTO_RESET_FAILED" });
+};
+byId<HTMLButtonElement>("autoConfirm").onclick = () => {
+  if (window.confirm(t("Have you checked Facebook and verified that this post is published?")))
+    void send({ type: "AUTO_CONFIRM_POST" });
+};
 byId<HTMLButtonElement>("autoRetry").onclick = () => void send({ type: "AUTO_START", campaignId: currentAutomatic?.campaignId });
 byId<HTMLButtonElement>("autoOpen").onclick = async () => {
   try {

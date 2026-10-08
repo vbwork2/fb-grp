@@ -12,6 +12,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const result = await db.transaction(async (tx) => {
     const [campaign] = await tx.select().from(campaigns).where(and(eq(campaigns.id, id), eq(campaigns.workspaceId, identity.workspaceId))).limit(1).for("update");
     if (!campaign) return null;
+    if (!["RUNNING", "PAUSED"].includes(campaign.status)) return -1;
     const retried = await tx.update(queueItems).set({ status: "READY", scheduledAt: new Date(), claimToken: null, claimedAt: null, errorCode: null, errorMessage: null, updatedAt: new Date() }).where(and(eq(queueItems.campaignId, campaign.id), eq(queueItems.workspaceId, identity.workspaceId), eq(queueItems.status, "FAILED"))).returning({ id: queueItems.id });
     if (retried.length) {
       await tx.update(campaigns).set({ status: "RUNNING", startedAt: campaign.startedAt ?? new Date(), updatedAt: new Date() }).where(eq(campaigns.id, campaign.id));
@@ -19,5 +20,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
     return retried.length;
   });
-  return result === null ? jsonError("RESOURCE_NOT_FOUND", "Campaign not found.", 404) : jsonSuccess({ retried: result });
+  if (result === null) return jsonError("RESOURCE_NOT_FOUND", "Campaign not found.", 404);
+  if (result === -1) return jsonError("INVALID_STATE", "Cancelled or completed campaigns cannot be restarted by retrying failed groups.", 409);
+  return jsonSuccess({ retried: result });
 }

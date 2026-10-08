@@ -1,30 +1,36 @@
-# Chrome Extension
+# Groupflow Chrome Extension — assisted Facebook Group campaigns
 
-Build with `npm run extension:build`. The unpacked extension is in `extension/dist`.
+## Setup
 
-1. Open `chrome://extensions`, enable Developer mode, and load `extension/dist`.
-2. Generate a pairing code in the web app's Settings. Enter the app URL and code in the extension.
-3. Request the next group. Open its Facebook post composer if it is not detected automatically.
-4. Click Prepare caption to review and edit the text, or click Publish to Facebook to fill and submit it in one action.
-5. For jobs with images, attach them in Facebook yourself, wait for uploads, then check Images attached in Facebook.
-6. Click Publish to Facebook. The extension validates the live job, checks the exact group, and clicks one enabled Post/Đăng button inside its composer.
-7. Inspect Facebook's result, including group approval requirements. Only then click I posted it to save history. A click alone is not recorded as a successful post.
+1. Build from this branch with `npm run extension:build` and load `extension/dist` at `chrome://extensions` (Developer mode).
+2. Pair the extension with Groupflow using a one-time device code from web Settings.
+3. Sign in to Facebook **directly in Chrome**. Groupflow never needs your Facebook password, cookies or 2FA codes.
+4. Select a campaign from the extension and press **Start preparing posts**. There is no fixed three-group cap; posting intervals still apply.
 
-## Automatic posting, up to three groups
+## How a campaign proceeds
 
-1. Create content with PNG, JPEG or WebP images in the web app.
-2. Create a campaign containing one to three groups you select and configure its posting intervals.
-3. Keep Chrome open and sign in to Facebook directly. Pair the extension with the web app.
-4. Click Refresh campaigns, select the campaign, then click Start automatic posting.
-5. The extension opens each due group, fills the caption, attaches images, waits for previews and an enabled Post button, and submits once. Chrome alarms check for the next due group every minute.
-6. Click Stop automatic posting to stop further submissions. Verification, missing controls, upload failures, group approval and uncertain results stop the run for review.
+1. Extension opens each scheduled Facebook Group and the **Bạn viết gì đi / Write something** composer.
+2. Extension inserts caption with preserved line breaks, attaches configured images, waits for previews and confirms the editor looks ready.
+3. **You review the post and click Đăng / Post inside Facebook yourself.** Groupflow does **not** click this button in assisted mode.
+4. Only after an actual user click, the extension waits for a fresh, recognizable Facebook publication confirmation. On confirmed success, it records history and opens the next group once due.
+5. A notice that the post is awaiting administrator approval, or an ambiguous/missing publication notice, pauses automation. Check Facebook first. If you can clearly verify that the post has actually been published, click **I verified this post is published** in the extension to record it and continue. Otherwise keep it pending for review.
 
-The server rejects campaigns containing more than three selected groups. Each run also stops after three submission attempts. Before submission the server reserves the job as AWAITING_CONFIRMATION; uncertain submissions cannot be reclaimed by another device. Only a new recognizable Facebook publication confirmation allows automatic history recording. Approval requests remain unconfirmed until reviewed.
+## Controls and recovery
 
-A sent or uncertain attempt is locked to avoid duplicates; inspect Facebook and use the manual outcome controls. Stopping cannot retract a submission already sent to Facebook. If no click occurred because the composer/button was missing or disabled, fix the page and retry.
+- **Stop monitoring:** stops the local run; does not cancel the campaign on the server. It cannot undo a Facebook submission.
+- **Cancel campaign:** cancels the campaign on the server and locally. Only submissions that are certain not to have been sent are released; uncertain submissions stay protected from duplicates.
+- **Reset failed groups:** sets only `FAILED` queue entries back to `READY`, without touching successful or unconfirmed submissions. Start again to process those groups.
+- **Advanced: manual posting and recovery:** provides caption copying and explicit outcome controls. Only use **I posted it** or **I verified this post is published** after reviewing the Facebook result.
 
-Copy and manual Facebook publishing remain available when the DOM adapter cannot identify the composer or Post button. Real Facebook behavior needs manual verification; automated tests use controlled pages.
+The web app can also cancel a campaign. Neither cancel nor reset can retract posts Facebook has already received. Queued groups are processed sequentially, not simultaneously, and must reach their scheduled time. Respect each group's rules and avoid unwanted posts.
 
-Reload the extension in `chrome://extensions` and reload already-open Facebook Group tabs after installing a new build. The Language selector offers English and Tiếng Việt.
+## Safety and troubleshooting
 
-All API requests go through the service worker. Tokens are stored locally and hashes on the server. The manifest supports Netlify app domains and localhost; add an exact custom app hostname before building when needed.
+- The extension does not bypass login, checkpoint or group-approval restrictions.
+- Claims are reserved before a user can click Post, and unknown results remain in `AWAITING_CONFIRMATION` rather than being automatically retried.
+- If a group fails before any possible submission, the job is marked `FAILED`, so it can be reset safely.
+- The Facebook editor and its notices can change. If publication confirmation is missing, use manual review instead of assuming success.
+- After updating the code, run `npm run extension:build`, reload the extension, and refresh Facebook tabs. A server redeploy alone will **not** update an unpacked Chrome Extension.
+- You can run checks locally with `npm run typecheck`, `npm run test`, `npm run extension:build` and `npx playwright test e2e/facebook-adapter.spec.ts`.
+
+API traffic goes through the extension service worker. Facebook authentication stays in the user's own Chrome session.

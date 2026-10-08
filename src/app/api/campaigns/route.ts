@@ -5,7 +5,7 @@ import { campaigns, campaignGroups, contents, groups } from "@/lib/db/schema";
 import { getIdentity } from "@/lib/auth/session";
 import { jsonError, jsonSuccess, verifySameOrigin } from "@/lib/security/http";
 
-const input = z.object({ name: z.string().trim().min(1).max(160), contentId: z.string().uuid(), groupIds: z.array(z.string().uuid()).min(1).max(1000), variantStrategy: z.enum(["PRIMARY_ONLY", "ROUND_ROBIN"]).default("PRIMARY_ONLY"), minIntervalSeconds: z.number().int().min(2).default(2), maxIntervalSeconds: z.number().int().min(2).default(2), scheduledStartAt: z.string().datetime().optional() }).refine((x) => x.minIntervalSeconds <= x.maxIntervalSeconds);
+const input = z.object({ name: z.string().trim().min(1).max(160), contentId: z.string().uuid(), groupIds: z.array(z.string().uuid()).min(1), variantStrategy: z.enum(["PRIMARY_ONLY", "ROUND_ROBIN"]).default("PRIMARY_ONLY"), minIntervalSeconds: z.number().int().min(2).default(2), maxIntervalSeconds: z.number().int().min(2).default(2), scheduledStartAt: z.string().datetime().optional() }).refine((x) => x.minIntervalSeconds <= x.maxIntervalSeconds);
 
 export async function GET() {
   const identity = await getIdentity();

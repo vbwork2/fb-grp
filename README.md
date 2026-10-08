@@ -1,8 +1,8 @@
 # Groupflow
 
-Groupflow is a multi-user Facebook Group posting assistant. It organizes reusable captions, images and campaign queues, then uses a paired Chrome Extension to open one Facebook Group at a time. Users can publish manually or explicitly start an automatic run for up to three selected groups.
+Groupflow is a multi-user Facebook Group posting assistant. It organizes reusable captions, images and campaign queues, then uses a paired Chrome Extension to prepare one Facebook Group post at a time across campaigns without a fixed group-count cap.
 
-The application never asks for Facebook credentials and never stores Facebook passwords, cookies, browser sessions, 2FA codes, or CAPTCHA answers. Automatic runs attach images and submit due posts after the user clicks Start automatic posting. Runs stop on errors or uncertain outcomes; only a recognizable publication confirmation records automatic success. See [extension setup](docs/extension.md).
+The application never asks for Facebook credentials and never stores Facebook passwords, cookies, browser sessions, 2FA codes, or CAPTCHA answers. Assisted campaigns fill due post captions and attach images, then wait for the user to click Post directly on Facebook. Confirmed successes automatically advance the queue; approval-required or unknown results pause for review. See [extension setup](docs/extension.md).
 
 ## Architecture
 

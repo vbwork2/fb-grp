@@ -1,7 +1,7 @@
-import { and, count, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { campaigns, campaignGroups, groups, queueItems } from "@/lib/db/schema";
+import { campaigns, groups, queueItems } from "@/lib/db/schema";
 import { getDevice } from "@/lib/auth/device";
 import { config } from "@/lib/config";
 import { jsonError, jsonSuccess } from "@/lib/security/http";
@@ -21,10 +21,6 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const { job } = row;
     if (parsed.data.action === "begin") {
       if (job.status !== "OPENED" || !job.claimedAt || job.claimedAt.getTime() <= Date.now() - config.queueClaimTtlMinutes * 60_000 || row.campaignStatus !== "RUNNING" || row.groupStatus !== "ACTIVE") return false;
-      if (parsed.data.automatic) {
-        const [selected] = await tx.select({ count: count() }).from(campaignGroups).where(eq(campaignGroups.campaignId, job.campaignId));
-        if (!selected || selected.count > 3 || selected.count < 1) return false;
-      }
       // Reserve before clicking so an uncertain attempt cannot be claimed again.
       await tx.update(queueItems).set({ status: "AWAITING_CONFIRMATION", updatedAt: new Date() }).where(eq(queueItems.id, id));
     } else {

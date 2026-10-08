@@ -16,7 +16,7 @@ const editInput = z.object({
     body: z.string().trim().min(1).max(10000),
     linkUrl: z.string().url().refine(isHttpUrl).optional().or(z.literal("")),
   }).optional(),
-  groupIds: z.array(z.string().uuid()).min(1).max(1000),
+  groupIds: z.array(z.string().uuid()).min(1),
   minIntervalSeconds: z.number().int().min(2),
   maxIntervalSeconds: z.number().int().min(2),
 }).strict().refine((value) => value.minIntervalSeconds <= value.maxIntervalSeconds && Boolean(value.contentId || value.contentDraft));

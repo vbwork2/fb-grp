@@ -313,6 +313,8 @@ function renderProgress(message: ComposerMessage): void {
     OPENING: "Đang mở nhóm Facebook",
     PREPARING: "Đang tìm ô viết bài và điền nội dung",
     SUBMITTING: "Đang đăng và xác nhận kết quả",
+    AWAITING_USER: "Bài đã sẵn sàng — hãy bấm Đăng trên Facebook",
+    VERIFYING: "Đang kiểm tra kết quả bài bạn vừa đăng",
     WAITING: "Đang chờ lịch đăng tiếp theo",
     PAUSED: "Đã tạm dừng — cần kiểm tra"
   };
@@ -320,16 +322,82 @@ function renderProgress(message: ComposerMessage): void {
   const info = document.createElement("div");
   info.style.cssText = "font-size:12px;color:#52675c;overflow-wrap:anywhere";
   info.textContent = message.error
-    ? "Không thể tiếp tục. Mở tiện ích Groupflow để xem lỗi và xử lý. Không tự đăng lại bài chưa rõ kết quả."
-    : (message.phase === "PREPARING" ? "Nếu không thấy ô soạn bài, hãy mở tiện ích để xem hướng dẫn." : "Mở tiện ích Groupflow để theo dõi chi tiết.");
+    ? "Mở Groupflow để xem lỗi. Nếu đã bấm Đăng, hãy kiểm tra bài trước khi tiếp tục."
+    : message.phase === "AWAITING_USER"
+      ? "Kiểm tra nội dung và ảnh, sau đó tự bấm Đăng trong cửa sổ Facebook. Groupflow sẽ kiểm tra kết quả."
+      : message.phase === "VERIFYING"
+        ? "Đừng bấm Đăng lần nữa. Đang đợi Facebook xác nhận kết quả."
+        : "Mở tiện ích Groupflow để theo dõi tiến trình.";
   panel.append(title, info);
   document.body.append(panel);
 }
 
+type UserPostWatcher = { jobId: string; detach: () => void };
+let postWatcher: UserPostWatcher | undefined;
+
+function armUserPost(message: ComposerMessage): AdapterResult {
+  if (!message.jobId || !message.expectedGroupUrl || groupPath(location.href) !== groupPath(message.expectedGroupUrl))
+    return { ok: false, clicked: false, message: "The Facebook group changed. Open the correct group." };
+  if (cancelled(message)) return { ok: false, clicked: false, message: "Automatic posting was stopped." };
+  const editor = openComposerEditor();
+  const dialog = editor?.closest<HTMLElement>("[role='dialog']");
+  if (!dialog) return { ok: false, clicked: false, message: "Facebook's post composer is not open." };
+  const matchingButtons = () => [...dialog.querySelectorAll<HTMLElement>("button, [role='button']")].filter(
+    (element) => visible(element) && /^(post|publish|đăng|đăng bài)$/i.test(labelOf(element))
+  );
+  if (matchingButtons().length !== 1)
+    return { ok: false, clicked: false, message: "The Facebook Post button could not be identified. Review manually." };
+  postWatcher?.detach();
+  let submitted = false;
+  const onClick = (event: MouseEvent) => {
+    if (submitted || !event.isTrusted || cancelled(message)) return;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const button = target.closest<HTMLElement>("button, [role='button']");
+    if (!button || !dialog.contains(button) || !matchingButtons().includes(button) ||
+        button.matches(":disabled, [aria-disabled='true']")) return;
+    submitted = true;
+    // The user (not Groupflow) clicked Facebook's Post button. Record this
+    // immediately, then inspect only fresh Facebook confirmation notices.
+    const previousNotices = new Set(notices());
+    document.removeEventListener("click", onClick, true);
+    void (async () => {
+      try {
+        const accepted = await chrome.runtime.sendMessage({
+          type: "USER_POST_CLICKED", jobId: message.jobId,
+        }) as { ok?: boolean };
+        if (!accepted?.ok) return;
+        const result = await outcome(previousNotices, message);
+        await chrome.runtime.sendMessage({
+          type: "USER_POST_RESULT", jobId: message.jobId, outcome: result,
+        });
+      } catch {
+        // On a service-worker restart the durable job stays awaiting review.
+        // We never assume a click means Facebook published the post.
+      } finally { if (postWatcher?.jobId === message.jobId) postWatcher = undefined; }
+    })();
+  };
+  document.addEventListener("click", onClick, true);
+  postWatcher = { jobId: message.jobId, detach: () => document.removeEventListener("click", onClick, true) };
+  return { ok: true, clicked: false, message: "Prepared. Click Post yourself, then Groupflow will check Facebook's result." };
+}
+
 chrome.runtime.onMessage.addListener((message: ComposerMessage, _sender, sendResponse) => {
   if (message.type === "PING") { sendResponse({ ok: true }); return; }
+  if (message.type === "RESET_SAFE_JOB") {
+    if (!message.jobId || attemptedJobs.has(message.jobId)) {
+      sendResponse({ ok: false }); return;
+    }
+    cancelledJobs.delete(message.jobId);
+    sendResponse({ ok: true }); return;
+  }
   if (message.type === "AUTO_PROGRESS") { renderProgress(message); sendResponse({ ok: true }); return; }
-  if (message.type === "CANCEL_JOB" && message.jobId) { cancelledJobs.add(message.jobId); sendResponse({ ok: true }); return; }
+  if (message.type === "ARM_USER_POST") { sendResponse(armUserPost(message)); return; }
+  if (message.type === "CANCEL_JOB" && message.jobId) {
+    cancelledJobs.add(message.jobId);
+    if (postWatcher?.jobId === message.jobId) { postWatcher.detach(); postWatcher = undefined; }
+    sendResponse({ ok: true }); return;
+  }
   if (message.type !== "PREPARE_CAPTION" && message.type !== "PUBLISH_POST") return;
   void handle(message).then(sendResponse).catch(() => sendResponse({ ok: false, clicked: message.jobId ? attemptedJobs.has(message.jobId) : false, message: "The Facebook action could not be completed. Check Facebook before trying again." }));
   return true;

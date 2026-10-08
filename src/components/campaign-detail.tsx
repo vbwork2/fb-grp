@@ -243,7 +243,7 @@ export default function CampaignDetail({
             <span className="text-emerald-700 text-base">ℹ</span>
             <p className="m-0 leading-relaxed">
               <T>
-                For automatic posting, select this campaign in the extension and click Start. Maximum 3 groups per run.
+                To post across groups, start this campaign in Groupflow. The extension prepares each post; you click Post in Facebook and verified successes move to the next group.
               </T>
             </p>
           </div>
