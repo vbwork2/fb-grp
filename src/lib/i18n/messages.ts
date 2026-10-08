@@ -1,5 +1,4 @@
 export const vietnamese: Record<string, string> = {
-  "Facebook could not preserve the caption formatting. Review the text and line breaks before publishing.": "Facebook không giữ được định dạng xuống dòng của bài viết. Hãy kiểm tra và sửa nội dung trước khi đăng.",
   "Images (optional)": "Ảnh (không bắt buộc)",
   "Choose JPG, PNG, or WebP images. They will be uploaded when you save content.": "Chọn ảnh JPG, PNG hoặc WebP. Ảnh sẽ được tải lên khi bạn lưu nội dung.",
   "Content and images saved.": "Đã lưu nội dung và ảnh.",
