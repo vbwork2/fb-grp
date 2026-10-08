@@ -30,7 +30,7 @@ test("authenticated workflows, tenant isolation, device claims, and password res
   let userId = ""; let workspaceId = ""; let contentId = ""; let campaignId = ""; let mediaId = "";
   const groupIds: string[] = [];
   const devices: Array<{ deviceId: string; deviceToken: string }> = [];
-  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ1sAAAAASUVORK5CYII=", "base64");
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4AWJiYGBgAAAAAP//XRcpzQAAAAZJREFUAwAADwADJDd96QAAAABJRU5ErkJggg==", "base64");
 
   async function data(response: APIResponse, status = 200) {
     const text = await response.text();

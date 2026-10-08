@@ -96,10 +96,33 @@ test("automatic image attachment waits for a preview and verifies publication", 
       const notice = document.createElement("div"); notice.setAttribute("role", "status"); notice.textContent = "Your post was published."; document.body.append(notice);
     };
   });
-  const attachments = [{ id: "image-1", filename: "pixel.png", mimeType: "image/png", dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ1sAAAAASUVORK5CYII=" }];
+  const attachments = [{ id: "image-1", filename: "pixel.png", mimeType: "image/png", dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4AWJiYGBgAAAAAP//XRcpzQAAAAZJREFUAwAADwADJDd96QAAAABJRU5ErkJggg==" }];
   expect((await send(page, { type: "PREPARE_CAPTION", ...job, attachments })).ok).toBe(true);
   await expect(page.locator("body")).toHaveAttribute("data-files", "pixel.png");
   expect((await send(page, { type: "PUBLISH_POST", ...job, trackOutcome: true })).outcome).toBe("published");
+});
+
+test("image preparation can retry invalid data and reattach after the dialog is replaced", async ({ page }) => {
+  const html = '<div role="dialog"><div role="textbox" contenteditable="true"></div><input type="file" accept="image/*" multiple><button class="post">Post</button></div>';
+  await setup(page, html);
+  const installPicker = async () => page.evaluate(() => {
+    const input = document.querySelector<HTMLInputElement>("input[type=file]")!;
+    input.onchange = () => {
+      const preview = document.createElement("img");
+      preview.src = URL.createObjectURL(input.files![0]);
+      preview.width = 30; preview.height = 30;
+      input.parentElement!.append(preview);
+    };
+  });
+  await installPicker();
+  const attachment = { id: "retry-image", filename: "retry.png", mimeType: "image/png", dataUrl: "invalid" };
+  expect(await send(page, { type: "PREPARE_CAPTION", ...job, attachments: [attachment] })).toMatchObject({ ok: false });
+  attachment.dataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4AWJiYGBgAAAAAP//XRcpzQAAAAZJREFUAwAADwADJDd96QAAAABJRU5ErkJggg==";
+  expect(await send(page, { type: "PREPARE_CAPTION", ...job, attachments: [attachment] })).toMatchObject({ ok: true });
+  await page.evaluate((markup) => { document.body.innerHTML = markup; }, html);
+  await installPicker();
+  expect(await send(page, { type: "PREPARE_CAPTION", ...job, attachments: [attachment] })).toMatchObject({ ok: true });
+  await expect(page.locator("[role=dialog] img")).toHaveCount(1);
 });
 
 test("automatic submission distinguishes group approval from publication", async ({ page }) => {
@@ -209,7 +232,7 @@ test("screenshot-like group page: use inline composer, attach image and publish 
   });
   const attachments = [{
     id: "image-2", filename: "sample.png", mimeType: "image/png",
-    dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ1sAAAAASUVORK5CYII="
+    dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4AWJiYGBgAAAAAP//XRcpzQAAAAZJREFUAwAADwADJDd96QAAAABJRU5ErkJggg=="
   }];
   expect((await send(page, { type: "PREPARE_CAPTION", ...job, attachments })).ok).toBe(true);
   await expect(page.locator("body")).toHaveAttribute("data-inline-clicked", "yes");
@@ -261,9 +284,13 @@ test("a group comment form is not a post composer", async ({ page }) => {
   await expect(page.locator("#comment-form [role='textbox']")).toHaveText("Bình luận");
 });
 
-test("image picker inserted outside the dialog is accepted only after Photo/video is opened", async ({ page }) => {
+test("image picker inserted outside the dialog ignores unrelated existing pickers", async ({ page }) => {
   await setup(page, '<div role="dialog"><div role="textbox" contenteditable="true"></div><button id="photo">Ảnh/video</button><button id="post" disabled>Đăng</button></div>');
   await page.evaluate(() => {
+    const unrelated = document.createElement("input");
+    unrelated.type = "file";
+    unrelated.accept = "image/*";
+    document.body.append(unrelated);
     const dialog = document.querySelector<HTMLElement>("[role='dialog']")!;
     dialog.querySelector<HTMLButtonElement>("#photo")!.onclick = () => {
       const picker = document.createElement("input");
@@ -281,10 +308,41 @@ test("image picker inserted outside the dialog is accepted only after Photo/vide
   });
   const attachments = [{
     id: "portal-image", filename: "portal.png", mimeType: "image/png",
-    dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ1sAAAAASUVORK5CYII="
+    dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4AWJiYGBgAAAAAP//XRcpzQAAAAZJREFUAwAADwADJDd96QAAAABJRU5ErkJggg=="
   }];
   expect((await send(page, { type: "PREPARE_CAPTION", ...job, attachments })).ok).toBe(true);
   await expect(page.locator("body")).toHaveAttribute("data-uploaded", "portal.png");
+});
+
+test("rich editor handles multiline paste through its own state", async ({ page }) => {
+  await setup(page, '<div role="dialog"><div role="textbox" contenteditable="true">Old draft</div><button class="post">Post</button></div>');
+  await page.getByRole("textbox").evaluate((editor) => {
+    editor.addEventListener("paste", (event) => {
+      const paste = event as ClipboardEvent;
+      paste.preventDefault();
+      setTimeout(() => {
+        editor.replaceChildren(...(paste.clipboardData?.getData("text/plain") ?? "").split("\n").map((line) => {
+          const paragraph = document.createElement("p");
+          if (line) paragraph.textContent = line;
+          else paragraph.append(document.createElement("br"));
+          return paragraph;
+        }));
+        document.body.dataset.editorState = "updated";
+      }, 20);
+    });
+  });
+  const caption = "First line\n\nSecond section\nLast line";
+  expect(await send(page, { type: "PREPARE_CAPTION", ...job, caption, linkUrl: null })).toMatchObject({ ok: true });
+  await expect(page.locator("body")).toHaveAttribute("data-editor-state", "updated");
+  await expect(page.getByRole("textbox").locator("p")).toHaveCount(4);
+  await expect(page.getByRole("textbox")).not.toContainText("Old draft");
+});
+
+test("leading blank lines replace the previous draft", async ({ page }) => {
+  await setup(page, '<div role="dialog"><div role="textbox" contenteditable="true">Old draft</div><button class="post">Post</button></div>');
+  expect(await send(page, { type: "PREPARE_CAPTION", ...job, caption: "\n\nNew draft\nNext line", linkUrl: null })).toMatchObject({ ok: true });
+  await expect(page.getByRole("textbox")).not.toContainText("Old draft");
+  await expect(page.getByRole("textbox")).toContainText("New draft");
 });
 
 
@@ -364,6 +422,16 @@ test("human clicks Facebook Post after preparation; extension reports outcome wi
   expect(await page.evaluate(() => (window as unknown as { finalPostClicks: number }).finalPostClicks)).toBe(1);
 });
 
+test("progress survives Facebook replacing the page after submission", async ({ page }) => {
+  await setup(page, '<main>Group feed</main>');
+  await send(page, { type: "AUTO_PROGRESS", enabled: true, phase: "VERIFYING" });
+  await expect(page.locator("#groupflow-progress-indicator")).toBeVisible();
+  await page.evaluate(() => { document.body.replaceChildren(document.createElement("main")); });
+  await expect(page.locator("#groupflow-progress-indicator")).toBeVisible();
+  await send(page, { type: "AUTO_PROGRESS", enabled: false, phase: "PAUSED" });
+  await expect(page.locator("#groupflow-progress-indicator")).toHaveCount(0);
+});
+
 test("cancelling a prepared watcher prevents later submission callbacks", async ({ page }) => {
   await setup(page, '<div role="dialog"><div role="textbox" contenteditable="true"></div><button class="post">Post</button></div>');
   expect((await send(page, { type: "ARM_USER_POST", ...job })).ok).toBe(true);
@@ -414,3 +482,172 @@ test("Facebook genuinely flattening a prepared multiline caption pauses safely",
   if (!result.ok) expect(result.reason).toBe("CAPTION_FORMAT_INVALID");
   expect(await page.evaluate(() => (window as unknown as { finalPostClicks: number }).finalPostClicks)).toBe(0);
 });
+
+for (const broken of ["missing-space", "missing-line"]) {
+  test(`Lexical rejects ${broken} during reconciliation`, async ({ page }) => {
+    await setup(page, '<div role="dialog"><div role="textbox" contenteditable="true"></div><button class="post">Post</button></div>');
+    await page.getByRole("textbox").evaluate((editor, variant) => {
+      editor.addEventListener("paste", (event) => {
+        event.preventDefault();
+        editor.innerHTML = variant === "missing-space" ? "<p>Two words</p><p>Secondline</p>" : "<p>Two wordsSecond line</p>";
+      });
+    }, broken);
+    expect(await send(page, { type: "PREPARE_CAPTION", ...job, caption: "Two words\nSecond line", linkUrl: null })).toMatchObject({ ok: false, reason: "CAPTION_FORMAT_INVALID" });
+    expect(await page.evaluate(() => (window as unknown as { finalPostClicks: number }).finalPostClicks)).toBe(0);
+  });
+}
+
+test("repeat preparation preserves a user edit", async ({ page }) => {
+  await setup(page, '<div role="dialog"><div role="textbox" contenteditable="true"></div><button class="post">Post</button></div>');
+  await send(page, { type: "PREPARE_CAPTION", ...job });
+  await page.getByRole("textbox").fill("My reviewed edit");
+  expect(await send(page, { type: "PREPARE_CAPTION", ...job })).toMatchObject({ ok: true });
+  await expect(page.getByRole("textbox")).toHaveText("My reviewed edit");
+});
+
+test("synthetic clicks never notify a user submission", async ({ page }) => {
+  await setup(page, '<div role="dialog"><div role="textbox" contenteditable="true"></div><button class="post">Post</button></div>');
+  await send(page, { type: "ARM_USER_POST", ...job });
+  await page.getByRole("button").evaluate((button: HTMLButtonElement) => button.click());
+  expect(await page.evaluate(() => (window as unknown as { automaticEvents: unknown[] }).automaticEvents)).toEqual([]);
+});
+
+test("failed upload retries after recovery without duplicating previews", async ({ page }) => {
+  test.setTimeout(45_000);
+  await setup(page, '<div role="dialog"><div role="textbox" contenteditable="true"></div><input type="file" accept="image/png"><button class="post">Post</button></div>');
+  await page.evaluate(() => {
+    let attempts = 0;
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')!;
+    input.onchange = () => {
+      document.body.dataset.uploadAttempts = String(++attempts);
+      if (attempts === 1) return;
+      const image = document.createElement("img");
+      image.src = URL.createObjectURL(input.files![0]); image.width = 20; image.height = 20;
+      document.querySelector('[role="dialog"]')!.append(image);
+    };
+  });
+  const attachments = [{ id: "retry-image", filename: "pixel.png", mimeType: "image/png", dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4AWJiYGBgAAAAAP//XRcpzQAAAAZJREFUAwAADwADJDd96QAAAABJRU5ErkJggg==" }];
+  const payload = { type: "PREPARE_CAPTION", ...job, attachments };
+  expect(await send(page, payload)).toMatchObject({ ok: false, reason: "UPLOAD_FAILED" });
+  expect(await send(page, payload)).toMatchObject({ ok: true });
+  expect(await send(page, payload)).toMatchObject({ ok: true });
+  await expect(page.locator('[role="dialog"] img')).toHaveCount(1);
+  await expect(page.locator("body")).toHaveAttribute("data-upload-attempts", "2");
+  expect(await page.evaluate(() => (window as unknown as { finalPostClicks: number }).finalPostClicks)).toBe(0);
+});
+
+for (const signal of ["old-toast", "feed-toast", "conflicting"] as const) {
+  test(`assisted verification rejects ${signal}`, async ({ page }) => {
+    await setup(page, '<div role="dialog"><div role="textbox" contenteditable="true"></div><button class="post">Post</button></div>');
+    await page.clock.install();
+    await page.evaluate((scenario) => {
+      const addNotice = (text: string, feed = false) => {
+        const host = document.createElement("div");
+        if (feed) host.setAttribute("role", "feed");
+        const notice = document.createElement("div"); notice.setAttribute("role", "status"); notice.textContent = text;
+        host.append(notice); document.body.append(host);
+      };
+      if (scenario === "old-toast") addNotice("Your post was published.");
+      document.querySelector<HTMLButtonElement>("button.post")!.onclick = () => {
+        if (scenario === "feed-toast") addNotice("Your post was published.", true);
+        if (scenario === "conflicting") { addNotice("Your post was published."); addNotice("Submitted for approval"); }
+      };
+    }, signal);
+    await send(page, { type: "ARM_USER_POST", ...job });
+    await page.getByRole("button", { name: "Post", exact: true }).click();
+    await page.clock.runFor(31_000);
+    await expect.poll(() => page.evaluate(() => (window as unknown as { automaticEvents: Array<{ outcome?: string }> }).automaticEvents.find((event) => event.outcome)?.outcome)).toBe("unknown");
+  });
+}
+
+test("Lexical paragraphs preserve double blank lines and joined Unicode emoji", async ({ page }) => {
+  await setup(page, '<div role="dialog"><div role="textbox" contenteditable="true"></div><button class="post">Post</button></div>');
+  await page.getByRole("textbox").evaluate((editor) => {
+    editor.addEventListener("paste", (event) => {
+      const paste = event as ClipboardEvent;
+      paste.preventDefault();
+      editor.replaceChildren(...paste.clipboardData!.getData("text/plain").split("\n").map((text) => {
+        const p = document.createElement("p");
+        if (text) p.textContent = text; else p.append(document.createElement("br"));
+        return p;
+      }));
+    });
+  });
+  const caption = "\uD83D\uDC69\u200D\uD83D\uDCBB Nghiên cứu  khoa học\r\n\r\n\r\n‘Thông tin’ https://example.test/path?q=1\r\n#NCKHSV";
+  expect(await send(page, { type: "PREPARE_CAPTION", ...job, caption, linkUrl: null })).toMatchObject({ ok: true });
+  await expect(page.getByRole("textbox").locator("p")).toHaveCount(5);
+});
+
+test("disabled Post cannot arm a submission watcher", async ({ page }) => {
+  await setup(page, '<div role="dialog"><div role="textbox" contenteditable="true"></div><button class="post" disabled>Post</button></div>');
+  expect(await send(page, { type: "ARM_USER_POST", ...job })).toMatchObject({ ok: false, reason: "POST_BUTTON_DISABLED" });
+});
+
+test("a changed preview never causes a duplicate upload", async ({ page }) => {
+  await setup(page, '<div role="dialog"><div role="textbox" contenteditable="true"></div><input type="file" accept="image/png"><button class="post">Post</button></div>');
+  await page.evaluate(() => {
+    const picker = document.querySelector<HTMLInputElement>('input[type="file"]')!;
+    let changes = 0;
+    picker.onchange = () => {
+      document.body.dataset.uploads = String(++changes);
+      const image = document.createElement("img"); image.src = URL.createObjectURL(picker.files![0]); image.width = 20; image.height = 20;
+      document.querySelector('[role="dialog"]')!.append(image);
+    };
+  });
+  const payload = { type: "PREPARE_CAPTION", ...job, attachments: [{ id: "verified-file", filename: "pixel.png", mimeType: "image/png", dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4AWJiYGBgAAAAAP//XRcpzQAAAAZJREFUAwAADwADJDd96QAAAABJRU5ErkJggg==" }] };
+  expect(await send(page, payload)).toMatchObject({ ok: true });
+  await page.locator('[role="dialog"] img').evaluate((image: HTMLImageElement) => {
+    const canvas = document.createElement("canvas"); canvas.width = 2; canvas.height = 2;
+    image.src = canvas.toDataURL();
+  });
+  expect(await send(page, payload)).toMatchObject({ ok: false, reason: "UPLOAD_FAILED" });
+  await expect(page.locator("body")).toHaveAttribute("data-uploads", "1");
+});
+
+test("partial previews pause retry without uploading duplicates", async ({ page }) => {
+  await setup(page, '<div role="dialog"><div role="textbox" contenteditable="true"></div><input type="file" accept="image/png" multiple><button class="post">Post</button></div>');
+  await page.clock.install();
+  await page.evaluate(() => {
+    const picker = document.querySelector<HTMLInputElement>('input[type="file"]')!;
+    picker.onchange = () => {
+      document.body.dataset.uploads = String(Number(document.body.dataset.uploads ?? "0") + 1);
+      const image = document.createElement("img"); image.src = URL.createObjectURL(picker.files![0]); image.width = 20; image.height = 20;
+      document.querySelector('[role="dialog"]')!.append(image);
+    };
+  });
+  const file = { filename: "pixel.png", mimeType: "image/png", dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4AWJiYGBgAAAAAP//XRcpzQAAAAZJREFUAwAADwADJDd96QAAAABJRU5ErkJggg==" };
+  const payload = { type: "PREPARE_CAPTION", ...job, attachments: [{ ...file, id: "first" }, { ...file, id: "second" }] };
+  const preparing = send(page, payload);
+  await expect(page.locator("body")).toHaveAttribute("data-uploads", "1");
+  await page.clock.runFor(31_000);
+  expect(await preparing).toMatchObject({ ok: false, reason: "UPLOAD_FAILED" });
+  expect(await send(page, payload)).toMatchObject({ ok: false, reason: "UPLOAD_FAILED" });
+  await expect(page.locator("body")).toHaveAttribute("data-uploads", "1");
+});
+
+for (const wrongImage of [false, true]) {
+  test(`local re-encoded preview ${wrongImage ? "rejects different pixels" : "accepts matching pixels without duplicate upload"}`, async ({ page }) => {
+    await setup(page, '<div role="dialog"><div role="textbox" contenteditable="true"></div><input type="file" accept="image/png"><button class="post">Post</button></div>');
+    await page.evaluate((wrong) => {
+      const input = document.querySelector<HTMLInputElement>('input[type="file"]')!;
+      (window as unknown as { uploads: number }).uploads = 0;
+      input.onchange = async () => {
+        (window as unknown as { uploads: number }).uploads++;
+        const bitmap = await createImageBitmap(input.files![0]);
+        const canvas = document.createElement("canvas"); canvas.width = bitmap.width; canvas.height = bitmap.height;
+        const context = canvas.getContext("2d")!;
+        context.drawImage(bitmap, 0, 0); bitmap.close();
+        if (wrong) { context.fillStyle = "red"; context.fillRect(0, 0, canvas.width, canvas.height); }
+        const preview = document.createElement("img"); preview.src = canvas.toDataURL(); preview.width = 30; preview.height = 30;
+        document.querySelector('[role="dialog"]')!.append(preview);
+      };
+    }, wrongImage);
+    const payload = { type: "PREPARE_CAPTION", ...job, attachments: [{ id: "reencoded-image", filename: "pixel.png", mimeType: "image/png", dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4AWJiYGBgAAAAAP//XRcpzQAAAAZJREFUAwAADwADJDd96QAAAABJRU5ErkJggg==" }] };
+    const result = await send(page, payload);
+    expect(result.ok).toBe(!wrongImage);
+    if (wrongImage) expect(result.reason).toBe("UPLOAD_PREVIEW_UNVERIFIED");
+    else expect((await send(page, payload)).ok).toBe(true);
+    expect(await page.evaluate(() => (window as unknown as { uploads: number }).uploads)).toBe(1);
+    expect(await page.evaluate(() => (window as unknown as { finalPostClicks: number }).finalPostClicks)).toBe(0);
+  });
+}

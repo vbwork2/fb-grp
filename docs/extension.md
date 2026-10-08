@@ -34,3 +34,9 @@ The web app can also cancel a campaign. Neither cancel nor reset can retract pos
 - You can run checks locally with `npm run typecheck`, `npm run test`, `npm run extension:build` and `npx playwright test e2e/facebook-adapter.spec.ts`.
 
 API traffic goes through the extension service worker. Facebook authentication stays in the user's own Chrome session.
+
+## Repair and verification details
+
+The old automatic Post switch is removed. A stored autoPublish preference is ignored by assisted campaigns. Actual trusted clicks have a separate audit event; a reservation alone is not a click. After a worker restart or lost watcher, the extension pauses for review rather than submitting again. Failed/skip operations cannot unlock an uncertain submission. Image decoding and loaded local previews are required; CDN-only or ambiguous previews need manual review.
+
+Run `npx playwright test e2e/facebook-adapter.spec.ts e2e/automatic-extension.spec.ts` to verify controlled DOM plus the actual unpacked popup/worker. See [repair report](repair-report.md) for this run and limitations.

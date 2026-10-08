@@ -4,12 +4,14 @@ import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { campaigns, campaignGroups, contents, groups, media, postHistory, queueItems, users, workspaces } from "../src/lib/db/schema";
+import { auditLogs, campaigns, campaignGroups, contents, groups, media, postHistory, queueItems, users, workspaces } from "../src/lib/db/schema";
 
 const client = new PGlite();
 const testDb = drizzle({ client });
 vi.mock("@/lib/db", () => ({ get db() { return testDb; } }));
 vi.mock("@/lib/storage", () => ({ getMedia: vi.fn(async () => new Uint8Array([1, 2, 3])), putMedia: vi.fn(), deleteMedia: vi.fn() }));
+vi.mock("@/lib/auth/session", () => ({ getIdentity: async () => identity }));
+const { deleteCampaign } = await import("../src/lib/services/delete-campaign");
 const { editCampaign } = await import("../src/lib/services/edit-campaign");
 let identity: { userId: string; workspaceId: string };
 let campaignId: string;
@@ -93,5 +95,131 @@ describe("campaign editing", () => {
   it.each(["RUNNING", "COMPLETED", "CANCELLED"] as const)("rejects editing a %s campaign", async (status) => {
     await testDb.update(campaigns).set({ status });
     expect(await editCampaign(campaignId, identity, edit())).toMatchObject({ error: "state" });
+  });
+});
+describe("campaign deletion", () => {
+  it.each(["READY", "PAUSED", "COMPLETED", "CANCELLED", "DRAFT"] as const)("deletes a %s campaign and its dependent records, preserving shared resources", async (status) => {
+    await testDb.update(campaigns).set({ status });
+    const [job] = await testDb.insert(queueItems).values({ workspaceId: identity.workspaceId, campaignId, groupId: groupIds[0], position: 0, scheduledAt: new Date(), status: "POSTED" }).returning();
+    await testDb.insert(postHistory).values({ workspaceId: identity.workspaceId, campaignId, groupId: groupIds[0], queueItemId: job.id, status: "POSTED" });
+    expect(await deleteCampaign(campaignId, identity)).toEqual({ error: null });
+    expect(await testDb.select().from(campaigns)).toHaveLength(0);
+    expect(await testDb.select().from(campaignGroups)).toHaveLength(0);
+    expect(await testDb.select().from(queueItems)).toHaveLength(0);
+    expect(await testDb.select().from(postHistory)).toHaveLength(0);
+    expect(await testDb.select().from(groups)).toHaveLength(3);
+    expect(await testDb.select().from(contents)).toHaveLength(1);
+    expect((await testDb.select().from(auditLogs))[0].action).toBe("CAMPAIGN_DELETED");
+  });
+  it("rejects deleting a running campaign", async () => {
+    await testDb.update(campaigns).set({ status: "RUNNING" });
+    expect(await deleteCampaign(campaignId, identity)).toEqual({ error: "running" });
+    expect(await testDb.select().from(campaigns)).toHaveLength(1);
+  });
+  it.each(["OPENED", "AWAITING_CONFIRMATION"] as const)("preserves a cancelled campaign with a %s job", async (status) => {
+    await testDb.update(campaigns).set({ status: "CANCELLED" });
+    await testDb.insert(queueItems).values({ workspaceId: identity.workspaceId, campaignId, groupId: groupIds[0], position: 0, scheduledAt: new Date(), status, claimToken: "protected-claim" });
+    expect(await deleteCampaign(campaignId, identity)).toEqual({ error: "claimed" });
+    expect((await testDb.select().from(queueItems))[0].claimToken).toBe("protected-claim");
+    expect(await testDb.select().from(auditLogs)).toHaveLength(0);
+  });
+  it("does not delete another workspace's campaign", async () => {
+    const [foreign] = await testDb.insert(workspaces).values({ ownerId: identity.userId, name: "Foreign" }).returning();
+    expect(await deleteCampaign(campaignId, { ...identity, workspaceId: foreign.id })).toEqual({ error: "missing" });
+    expect(await testDb.select().from(campaigns)).toHaveLength(1);
+  });
+  it("DELETE endpoint enforces Origin and UUID validation", async () => {
+    const { DELETE } = await import("../src/app/api/campaigns/[id]/route");
+    const context = { params: Promise.resolve({ id: campaignId }) };
+    expect((await DELETE(new Request("https://example.test/api/campaigns", { method: "DELETE" }), context)).status).toBe(403);
+    const request = () => new Request("https://example.test/api/campaigns", { method: "DELETE", headers: { origin: "https://example.test", host: "example.test" } });
+    expect((await DELETE(request(), { params: Promise.resolve({ id: "invalid" }) })).status).toBe(400);
+    expect((await DELETE(request(), context)).status).toBe(200);
+    expect((await DELETE(request(), context)).status).toBe(404);
+  });
+});
+
+describe("content library saved images", () => {
+  it("loads all saved images for displayed content and excludes other workspaces and unattached files", async () => {
+    const { getContentLibraryMedia } = await import("../src/lib/services/content-library");
+    const [otherSpace] = await testDb.insert(workspaces).values({ name: "Other workspace", ownerId: identity.userId }).returning();
+    const [otherContent] = await testDb.insert(contents).values({ workspaceId: otherSpace.id, createdBy: identity.userId, name: "Other", body: "Other" }).returning();
+    await testDb.insert(media).values([
+      { workspaceId: identity.workspaceId, contentId, storageKey: "first-library-image", mimeType: "image/png", originalFilename: "first.png", sizeBytes: 100, createdAt: new Date("2026-01-01") },
+      { workspaceId: identity.workspaceId, contentId, storageKey: "second-library-image", mimeType: "image/jpeg", originalFilename: "second.jpg", sizeBytes: 200, createdAt: new Date("2026-01-02") },
+      { workspaceId: otherSpace.id, contentId: otherContent.id, storageKey: "other-library-image", mimeType: "image/png", originalFilename: "other.png", sizeBytes: 100 },
+      { workspaceId: identity.workspaceId, contentId: null, storageKey: "unattached-library-image", mimeType: "image/png", originalFilename: "unattached.png", sizeBytes: 100 },
+    ]);
+    const firstLoad = await getContentLibraryMedia(identity.workspaceId, [contentId, otherContent.id]);
+    expect(firstLoad[contentId].map((image) => image.originalFilename)).toEqual(["first.png", "second.jpg"]);
+    expect(Object.keys(firstLoad)).toEqual([contentId]);
+    expect(firstLoad[contentId][0]).not.toHaveProperty("storageKey");
+    expect(await getContentLibraryMedia(identity.workspaceId, [contentId])).toEqual(firstLoad);
+    expect(await getContentLibraryMedia(otherSpace.id, [contentId])).toEqual({});
+  });
+  it("returns an empty map for an empty library or content with no images", async () => {
+    const { getContentLibraryMedia } = await import("../src/lib/services/content-library");
+    expect(await getContentLibraryMedia(identity.workspaceId, [])).toEqual({});
+    expect(await getContentLibraryMedia(identity.workspaceId, [contentId])).toEqual({});
+  });
+});
+
+describe("content image deletion", () => {
+  const deleteRequest = () => new Request("https://example.test/api/media", { method: "DELETE", headers: { origin: "https://example.test", host: "example.test" } });
+  async function savedImage() {
+    const [image] = await testDb.insert(media).values({ workspaceId: identity.workspaceId, contentId, storageKey: "delete-image-key", mimeType: "image/png", originalFilename: "delete.png", sizeBytes: 100 }).returning();
+    return image;
+  }
+  it("deletes only the selected image and its stored file and persists the reduced count", async () => {
+    const { DELETE } = await import("../src/app/api/media/[id]/route");
+    const { deleteMedia } = await import("../src/lib/storage");
+    const { getContentLibraryMedia } = await import("../src/lib/services/content-library");
+    const image = await savedImage();
+    const [kept] = await testDb.insert(media).values({ workspaceId: identity.workspaceId, contentId, storageKey: "keep-image-key", mimeType: "image/png", originalFilename: "keep.png", sizeBytes: 100 }).returning();
+    const context = { params: Promise.resolve({ id: image.id }) };
+    expect((await DELETE(deleteRequest(), context)).status).toBe(200);
+    expect(deleteMedia).toHaveBeenCalledWith(image.storageKey);
+    expect((await getContentLibraryMedia(identity.workspaceId, [contentId]))[contentId].map((entry) => entry.id)).toEqual([kept.id]);
+    expect(await testDb.select().from(contents)).toHaveLength(1);
+    expect(await testDb.select().from(campaigns)).toHaveLength(1);
+    expect((await DELETE(deleteRequest(), context)).status).toBe(404);
+  });
+  it("rejects foreign Origin and invalid media IDs without deleting images", async () => {
+    const { DELETE } = await import("../src/app/api/media/[id]/route");
+    const image = await savedImage();
+    expect((await DELETE(new Request("https://example.test/api/media", { method: "DELETE", headers: { origin: "https://foreign.test", host: "example.test" } }), { params: Promise.resolve({ id: image.id }) })).status).toBe(403);
+    expect((await DELETE(deleteRequest(), { params: Promise.resolve({ id: "invalid" }) })).status).toBe(400);
+    expect(await testDb.select().from(media)).toHaveLength(1);
+  });
+  it("does not delete or expose another workspace's media", async () => {
+    const { DELETE } = await import("../src/app/api/media/[id]/route");
+    const { deleteMedia } = await import("../src/lib/storage");
+    vi.mocked(deleteMedia).mockClear();
+    const [otherSpace] = await testDb.insert(workspaces).values({ name: "Other workspace", ownerId: identity.userId }).returning();
+    const [image] = await testDb.insert(media).values({ workspaceId: otherSpace.id, storageKey: "foreign-image-key", mimeType: "image/png", originalFilename: "private.png", sizeBytes: 100 }).returning();
+    expect((await DELETE(deleteRequest(), { params: Promise.resolve({ id: image.id }) })).status).toBe(404);
+    expect(deleteMedia).not.toHaveBeenCalled();
+    expect(await testDb.select().from(media)).toHaveLength(1);
+  });
+  it("retains metadata on storage failure and permits retry", async () => {
+    const { DELETE } = await import("../src/app/api/media/[id]/route");
+    const { deleteMedia } = await import("../src/lib/storage");
+    const image = await savedImage();
+    vi.mocked(deleteMedia).mockRejectedValueOnce(new Error("Storage unavailable"));
+    const context = { params: Promise.resolve({ id: image.id }) };
+    expect((await DELETE(deleteRequest(), context)).status).toBe(500);
+    expect(await testDb.select().from(media)).toHaveLength(1);
+    expect((await DELETE(deleteRequest(), context)).status).toBe(200);
+    expect(await testDb.select().from(media)).toHaveLength(0);
+  });
+  it("inline content updates preserve saved images and other content", async () => {
+    const { PATCH } = await import("../src/app/api/content/[id]/route");
+    const image = await savedImage();
+    const [other] = await testDb.insert(contents).values({ workspaceId: identity.workspaceId, createdBy: identity.userId, name: "Unchanged", body: "Unchanged caption" }).returning();
+    const response = await PATCH(new Request("https://example.test/api/content", { method: "PATCH", headers: { origin: "https://example.test", host: "example.test", "content-type": "application/json" }, body: JSON.stringify({ name: "Updated name", body: "Updated caption", linkUrl: "https://example.test/item" }) }), { params: Promise.resolve({ id: contentId }) });
+    expect(response.status).toBe(200);
+    expect((await testDb.select().from(contents).where(eq(contents.id, contentId)))[0]).toMatchObject({ name: "Updated name", body: "Updated caption" });
+    expect((await testDb.select().from(contents).where(eq(contents.id, other.id)))[0].body).toBe("Unchanged caption");
+    expect((await testDb.select().from(media))[0].id).toBe(image.id);
   });
 });

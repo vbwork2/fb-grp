@@ -30,5 +30,11 @@ export async function deleteMedia(key: string): Promise<void> {
   if (process.env.NODE_ENV === "production") { await getStore({ name: "groupflow-media" }).delete(key); return; }
   const { unlink } = await import("node:fs/promises");
   const target = resolve(localRoot, key);
-  if (target.startsWith(`${resolve(localRoot)}${sep}`)) await unlink(target).catch(() => undefined);
+  if (!target.startsWith(`${resolve(localRoot)}${sep}`)) throw new Error("Invalid storage key.");
+  try {
+    await unlink(target);
+  } catch (error) {
+    // An already missing file does not prevent removing its metadata.
+    if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) throw error;
+  }
 }

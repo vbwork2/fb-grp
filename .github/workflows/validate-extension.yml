@@ -5,8 +5,25 @@ on:
       - "extension/**"
       - "src/app/api/extension/**"
       - "src/lib/i18n/**"
+      - "src/lib/services/**"
+      - "src/lib/db/schema.ts"
+      - "src/lib/validators/**"
+      - "src/app/api/campaigns/**"
+      - "src/components/delete-campaign-button.tsx"
+      - "src/components/campaign-detail.tsx"
+      - "src/components/workspace-panel.tsx"
       - "tests/**"
       - "e2e/facebook-adapter.spec.ts"
+      - "e2e/automatic-extension.spec.ts"
+      - "e2e/campaign-delete.spec.ts"
+      - "e2e/content-library.spec.ts"
+      - "e2e/inline-management.spec.ts"
+      - "src/components/campaign-editor.tsx"
+      - "src/app/(app)/content/**"
+      - "src/app/api/media/**"
+      - "src/lib/storage/**"
+      - "package-lock.json"
+      - "playwright.config.ts"
       - "e2e/live-workflow.spec.ts"
       - ".github/workflows/validate-extension.yml"
 jobs:
@@ -25,6 +42,8 @@ jobs:
         run: npm --prefix extension ci
       - name: Check server-side types
         run: npm run typecheck
+      - name: Lint
+        run: npm run lint
       - name: Run unit tests
         run: npm run test
       - name: Build Chrome extension
@@ -32,4 +51,4 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
       - name: Test Facebook adapter on controlled UI
-        run: npx playwright test e2e/facebook-adapter.spec.ts
+        run: npx playwright test e2e/facebook-adapter.spec.ts e2e/automatic-extension.spec.ts e2e/campaign-delete.spec.ts e2e/content-library.spec.ts e2e/inline-management.spec.ts

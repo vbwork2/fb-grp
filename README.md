@@ -56,7 +56,7 @@ Use the Language selector at the bottom right of any web page to choose English 
 
 The Chrome Extension has its own language selector at the top of the popup. Its choice persists in `chrome.storage.local`. Reload the unpacked extension after rebuilding to use the new popup.
 
-Campaign schedules determine when jobs become available. The extension opens groups and can prepare captions; the user reviews, clicks Publish to Facebook in the extension or publishes directly on Facebook, and then verifies the result before confirming history.
+Campaign schedules determine when jobs become available. In assisted campaigns the extension prepares each post, then the user reviews and clicks Post directly on Facebook. Only a reliable publication confirmation advances the queue. Advanced manual controls remain available for recovery.
 
 ## Authentication setup
 
@@ -94,7 +94,7 @@ npm run test:acceptance
 npm run extension:build
 ```
 
-Vitest runs 48 security, queue, database and extension tests. With `.env.local` configured and `npm run dev` running in another terminal, `npm run test:acceptance` builds the extension and runs 23 Playwright checks, including real Neon API workflows, concurrent device claims, a Chromium extension session, and isolated migrations/seed. Tests create temporary data and clean it afterward. Install Chromium first with `npx playwright install chromium` if needed. Default `npm run test:e2e` runs public/adapter checks and skips live database checks. See [verification report](docs/verification.md).
+Vitest includes disposable in-memory PostgreSQL API regression tests. Playwright runs controlled Facebook DOM fixtures and the actual unpacked extension popup/service worker, including campaigns with more than three groups. Install Chromium with `npx playwright install chromium`. Live database acceptance is optional and requires a verified disposable test database; do not run it against production. See [verification report](docs/verification.md).
 
 ## Production deployment
 

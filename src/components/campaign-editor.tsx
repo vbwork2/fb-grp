@@ -64,6 +64,13 @@ export default function CampaignEditor({ campaign, selectedGroupIds, availableGr
       window.location.reload();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to save changes."); setBusy(false); }
   }
+  const groupEditor = groupDraft ? <div className="form" style={{ border: "1px solid var(--line)", padding: 16 }}>
+          <h3><T>{groupDraft.id ? "Edit group" : "Add a Facebook Group"}</T></h3>
+          <div className="field"><label htmlFor="campaignGroupName"><T>{"Group name"}</T></label><input id="campaignGroupName" value={groupDraft.name} maxLength={160} onChange={(event) => setGroupDraft({ ...groupDraft, name: event.target.value })} /></div>
+          <div className="field"><label htmlFor="campaignGroupUrl"><T>{"Facebook Group URL"}</T></label><input id="campaignGroupUrl" type="url" value={groupDraft.facebookUrl} onChange={(event) => setGroupDraft({ ...groupDraft, facebookUrl: event.target.value })} /></div>
+          <p className="muted"><T>{"Group name and URL changes apply to your workspace. Removing a group here only removes it from this campaign."}</T></p>
+          <div className="buttons"><button type="button" className="button small primary" onClick={() => void saveGroup()}><T>{"Save group"}</T></button><button type="button" className="button small" onClick={() => setGroupDraft(null)}><T>{"Close"}</T></button></div>
+        </div> : null;
   return <section className="panel" aria-labelledby="campaignEditorTitle">
     <div className="panel-head"><h2 id="campaignEditorTitle"><T>{"Edit campaign"}</T></h2><button className="button small" type="button" disabled={busy} onClick={onClose}><T>{"Close"}</T></button></div>
     <form className="form" style={{ padding: 20 }} onSubmit={submit}>
@@ -80,20 +87,15 @@ export default function CampaignEditor({ campaign, selectedGroupIds, availableGr
         <div className="field"><label htmlFor="campaignContentLink"><T>{"Link (optional)"}</T></label><input id="campaignContentLink" type="url" value={linkUrl} onChange={(event) => setLinkUrl(event.target.value)} /></div>
         <p className="muted"><T>{"Edited captions are saved as a separate content copy with the original images. Other campaigns keep their content. Replacing content uses its primary caption."}</T></p>
         <div className="row"><h3><T>{"Selected groups"}</T> ({groupIds.length})</h3><button className="button small" type="button" onClick={() => { setGroupDraft({ name: "", facebookUrl: "" }); setGroupMessage(""); }}><T>{"Add a Facebook Group"}</T></button></div>
+        {groupDraft && !groupDraft.id && groupEditor}
         <div className="field"><label htmlFor="campaignGroupSearch"><T>{"Search groups"}</T></label><input id="campaignGroupSearch" value={search} onChange={(event) => setSearch(event.target.value)} /></div>
         <div style={{ maxHeight: 360, overflowY: "auto" }}>
           {groups.filter((group) => (group.status === "ACTIVE" || selectedGroupIds.includes(group.id)) && group.name.toLowerCase().includes(search.toLowerCase())).map((group) => <div key={group.id} className="row" style={{ padding: "10px 0", gap: 12, flexWrap: "wrap" }}>
             <label style={{ display: "flex", alignItems: "center", gap: 8 }}><input type="checkbox" checked={groupIds.includes(group.id)} onChange={(event) => setGroupIds((current) => event.target.checked ? [...current, group.id] : current.filter((id) => id !== group.id))} />{group.name}</label>
             <div className="buttons"><button type="button" className="button small" onClick={() => setGroupDraft({ id: group.id, name: group.name, facebookUrl: group.facebookUrl })}><T>{"Edit group"}</T></button>{groupIds.includes(group.id) && <button type="button" className="button small danger" onClick={() => setGroupIds((current) => current.filter((id) => id !== group.id))}><T>{"Remove from campaign"}</T></button>}</div>
+            {groupDraft?.id === group.id && <div style={{ flexBasis: "100%", minWidth: 0 }}>{groupEditor}</div>}
           </div>)}
         </div>
-        {groupDraft && <div className="form" style={{ border: "1px solid var(--line)", padding: 16 }}>
-          <h3><T>{groupDraft.id ? "Edit group" : "Add a Facebook Group"}</T></h3>
-          <div className="field"><label htmlFor="campaignGroupName"><T>{"Group name"}</T></label><input id="campaignGroupName" value={groupDraft.name} maxLength={160} onChange={(event) => setGroupDraft({ ...groupDraft, name: event.target.value })} /></div>
-          <div className="field"><label htmlFor="campaignGroupUrl"><T>{"Facebook Group URL"}</T></label><input id="campaignGroupUrl" type="url" value={groupDraft.facebookUrl} onChange={(event) => setGroupDraft({ ...groupDraft, facebookUrl: event.target.value })} /></div>
-          <p className="muted"><T>{"Group name and URL changes apply to your workspace. Removing a group here only removes it from this campaign."}</T></p>
-          <div className="buttons"><button type="button" className="button small primary" onClick={() => void saveGroup()}><T>{"Save group"}</T></button><button type="button" className="button small" onClick={() => setGroupDraft(null)}><T>{"Close"}</T></button></div>
-        </div>}
         {groupMessage && <p className="notice" role="status"><T>{groupMessage}</T></p>}
         <p className="muted"><T>{"Previously processed posts keep their history and are not posted again. Pending posts are rescheduled when you save."}</T></p>
         <button className="button primary" style={{ justifySelf: "start" }}><T>{busy ? "Saving…" : "Save campaign changes"}</T></button>

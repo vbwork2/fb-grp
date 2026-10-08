@@ -1,11 +1,19 @@
-export {};
+import { classifyPostSignals } from "./post-outcome";
 
-type ComposerMessage = { type?: string; jobId?: string; expectedGroupUrl?: string; caption?: string; linkUrl?: string; attachments?: { id: string; filename: string; mimeType: string; dataUrl: string }[]; trackOutcome?: boolean; phase?: string; status?: string; error?: string; enabled?: boolean };
+type ComposerMessage = { type?: string; jobId?: string; expectedGroupUrl?: string; caption?: string; linkUrl?: string; attachments?: { id: string; filename: string; mimeType: string; dataUrl: string }[]; trackOutcome?: boolean; phase?: string; status?: string; error?: string; enabled?: boolean; generation?: number; uploadError?: string };
 type AdapterResult = { ok: boolean; clicked?: boolean; reason?: string; message?: string; outcome?: "published" | "approval" | "unknown" };
 const attemptedJobs = new Set<string>();
 const cancelledJobs = new Set<string>();
+const jobGenerations = new Map<string, number>();
 const uploadedFiles = new Map<string, Set<string>>();
 const uploadResults = new Map<string, Promise<boolean>>();
+const uploadScopes = new Map<string, Element>();
+const uploadAttempts = new Map<string, Map<HTMLImageElement, string>>();
+const verifiedPreviews = new Map<string, Map<HTMLImageElement, string>>();
+function clearUploadState(jobId: string): void {
+  uploadResults.delete(jobId); uploadedFiles.delete(jobId); uploadScopes.delete(jobId);
+  uploadAttempts.delete(jobId); verifiedPreviews.delete(jobId);
+}
 let preparedJob: { id: string; editor: HTMLElement } | undefined;
 
 function visible(element: HTMLElement): boolean {
@@ -103,48 +111,42 @@ function captionText(message: ComposerMessage): string {
     .filter(Boolean).join("\n\n").replace(/\r\n?/g, "\n").replace(/[\u2028\u2029]/g, "\n");
 }
 
-// Facebook's editor may render a newline as <br>, nested <div>, a
-// Lexical <p>, or even duplicate visual separators. Literal equality with
-// innerText is therefore not reliable. Compare the actual characters
-// independently of layout, then separately verify that the editor has a
-// visually meaningful line break.
-function compactCaption(value: string): string {
-  return value.normalize("NFC").replace(/[\s\u200b\ufeff\u2060]/gu, "");
+// Read logical DOM breaks instead of browser-specific innerText paragraph spacing.
+function normalizeCaption(value: string): string {
+  return value.normalize("NFC").replace(/\r\n?/g, "\n").replace(/[\u2028\u2029]/g, "\n").replace(/\u00a0/g, " ");
 }
-
 function editorText(editor: HTMLElement): string {
-  if (editor instanceof HTMLTextAreaElement) return editor.value;
-  const children = [...editor.children];
-  if (children.length && children.every((child) => /^(P|DIV)$/i.test(child.tagName))) {
-    return children.map((child) => (child as HTMLElement).innerText.replace(/\n+$/, "")).join("\n");
-  }
-  return editor.innerText;
+  if (editor instanceof HTMLTextAreaElement) return normalizeCaption(editor.value);
+  const read = (node: Node): string => {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
+    if (!(node instanceof Element)) return "";
+    if (node.tagName === "BR") return "\n";
+    const children = [...node.childNodes];
+    if (children.length === 1 && children[0] instanceof Element && children[0].tagName === "BR") return "";
+    let result = "";
+    children.forEach((child, index) => {
+      const block = child instanceof Element && /^(P|DIV)$/.test(child.tagName);
+      const previous = children[index - 1];
+      const previousBlock = previous instanceof Element && /^(P|DIV)$/.test(previous.tagName);
+      if (index && (block || previousBlock)) result += "\n";
+      result += read(child);
+    });
+    // Chromium adds one trailing filler BR to keep the caret on an empty line.
+    if (children.length > 1 && children.at(-1) instanceof Element &&
+        (children.at(-1) as Element).tagName === "BR" &&
+        children.at(-2) instanceof Element && (children.at(-2) as Element).tagName === "BR") result = result.slice(0, -1);
+    return result;
+  };
+  return normalizeCaption(read(editor));
 }
-
-function visibleLineBreaks(editor: HTMLElement): boolean {
-  if (editor instanceof HTMLTextAreaElement) return /\n/.test(editor.value);
-  if (/\n/.test(editorText(editor))) return true;
-  // Some rich editors expose paragraph boundaries in the DOM but do not
-  // include them in innerText until they have been reconciled.
-  const blocks = [...editor.querySelectorAll("p, div")].filter((node) =>
-    node.closest("[contenteditable='true']") === editor
-  );
-  return blocks.length > 1 || Boolean(editor.querySelector("br"));
-}
-
 function captionMatches(editor: HTMLElement, text: string): boolean {
-  const typed = editor instanceof HTMLTextAreaElement
-    ? editor.value
-    : editor.textContent ?? "";
-  if (!compactCaption(typed) || compactCaption(typed) !== compactCaption(text)) return false;
-  // A missed or extra paragraph separator must not cause a false rejection
-  // when the whole caption is intact and line breaks remain visible. Users
-  // still review the formatted post before clicking Facebook's Post button.
-  return !text.includes("\n") || visibleLineBreaks(editor);
+  return Boolean(text) && editorText(editor) === normalizeCaption(text);
 }
 
 async function fill(editor: HTMLElement, message: ComposerMessage): Promise<boolean> {
   const text = captionText(message);
+  // A repeated prepare must preserve a draft the user has reviewed or edited.
+  if (preparedJob && preparedJob.id === message.jobId && preparedJob.editor === editor) return true;
   editor.focus();
   if (editor instanceof HTMLTextAreaElement) {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(editor, text);
@@ -153,13 +155,28 @@ async function fill(editor: HTMLElement, message: ComposerMessage): Promise<bool
     const selection = window.getSelection();
     if (!selection) return false;
     selection.selectAllChildren(editor);
+    // Let rich editors import plain text through their own paste handler.
+    // Lexical converts newlines into editor state instead of raw DOM text.
+    const clipboard = new DataTransfer();
+    clipboard.setData("text/plain", text);
+    const paste = new ClipboardEvent("paste", { clipboardData: clipboard, bubbles: true, cancelable: true });
+    editor.dispatchEvent(paste);
+    if (paste.defaultPrevented) {
+      const valid = await waitFor(() => captionMatches(editor, text) ? true : undefined, 1800);
+      if (valid && message.jobId) preparedJob = { id: message.jobId, editor };
+      return Boolean(valid);
+    }
     const lines = text.split("\n");
+    // Clear the selection even when the first line is empty.
+    if (!document.execCommand("delete", false)) return false;
     // Unlike one insertText containing literal \n, insertLineBreak inserts
     // actual <br> nodes / Lexical line breaks (like Shift+Enter).
     for (let i = 0; i < lines.length; i++) {
       if (cancelled(message)) return false;
       if (i > 0 && !document.execCommand("insertLineBreak", false) && !document.execCommand("insertParagraph", false)) return false;
       if (lines[i] && !document.execCommand("insertText", false, lines[i])) return false;
+      // Allow the editor to reconcile before the next editing command.
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
     }
   }
   // Facebook can reconcile its Lexical state asynchronously. Wait for a
@@ -170,13 +187,11 @@ async function fill(editor: HTMLElement, message: ComposerMessage): Promise<bool
 }
 
 function lostCaptionLineBreaks(editor: HTMLElement, message: ComposerMessage): boolean {
-  const intended = captionText(message);
-  if (!intended.includes("\n") || visibleLineBreaks(editor)) return false;
-  // This is a *definite* collapse: the same caption characters are present
-  // without any rendered line break. Do not block a human-edited caption
-  // merely because Facebook normalized spaces/paragraph boundaries.
-  const actual = editor instanceof HTMLTextAreaElement ? editor.value : editor.textContent ?? "";
-  return compactCaption(actual) === compactCaption(intended);
+  const expected = normalizeCaption(captionText(message));
+  const actual = editorText(editor);
+  // Detect flattening without treating a deliberate human rewrite as an overwrite request.
+  return expected.includes("\n") && !actual.includes("\n") &&
+    actual.replace(/\n/g, "") === expected.replace(/\n/g, "");
 }
 
 async function waitFor<T>(read: () => T | undefined, milliseconds: number): Promise<T | undefined> {
@@ -189,7 +204,7 @@ async function waitFor<T>(read: () => T | undefined, milliseconds: number): Prom
   });
 }
 
-function cancelled(message: ComposerMessage) { return Boolean(message.jobId && cancelledJobs.has(message.jobId)); }
+function cancelled(message: ComposerMessage) { return Boolean(message.jobId && (cancelledJobs.has(message.jobId) || (message.expectedGroupUrl && groupPath(location.href) !== groupPath(message.expectedGroupUrl)) || message.generation !== (jobGenerations.get(message.jobId) ?? 0))); }
 function reportStage(message: ComposerMessage, stage: string): void {
   if (message.type !== "PREPARE_CAPTION" || !message.jobId) return;
   // Reporting is best-effort and must never prevent caption/image preparation.
@@ -198,13 +213,47 @@ function reportStage(message: ComposerMessage, stage: string): void {
   } catch { /* The background worker might have restarted. */ }
 }
 
+async function pixelDigest(blob: Blob, width?: number, height?: number): Promise<string | undefined> {
+  const bitmap = await createImageBitmap(blob);
+  const canvas = document.createElement("canvas");
+  try {
+    const targetWidth = width ?? bitmap.width;
+    const targetHeight = height ?? bitmap.height;
+    if (targetWidth * targetHeight > 32_000_000 || Math.abs(bitmap.width / bitmap.height - targetWidth / targetHeight) / (bitmap.width / bitmap.height) > 0.01) return;
+    canvas.width = targetWidth; canvas.height = targetHeight;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return;
+    context.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
+    const pixels = context.getImageData(0, 0, targetWidth, targetHeight).data;
+    return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", pixels)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  } finally {
+    bitmap.close(); canvas.width = 0; canvas.height = 0;
+  }
+}
+
 async function attachImages(scope: Element, message: ComposerMessage): Promise<boolean> {
   if (!message.attachments?.length || !message.jobId) return true;
+  if (uploadScopes.get(message.jobId) !== scope) {
+    uploadResults.delete(message.jobId);
+    uploadedFiles.delete(message.jobId);
+    uploadAttempts.delete(message.jobId);
+    verifiedPreviews.delete(message.jobId);
+    uploadScopes.set(message.jobId, scope);
+  }
+  const previews = verifiedPreviews.get(message.jobId);
+  if (previews && [...previews].some(([image, source]) => !scope.contains(image) || image.src !== source || !image.complete || !image.naturalWidth)) return false;
   const previous = uploadResults.get(message.jobId);
   if (previous) return previous;
   const result = uploadImages(scope, message);
   uploadResults.set(message.jobId, result);
-  return result;
+  try {
+    const success = await result;
+    if (!success && uploadResults.get(message.jobId) === result) uploadResults.delete(message.jobId);
+    return success;
+  } catch (cause) {
+    if (uploadResults.get(message.jobId) === result) uploadResults.delete(message.jobId);
+    throw cause;
+  }
 }
 
 async function uploadImages(scope: Element, message: ComposerMessage): Promise<boolean> {
@@ -213,62 +262,119 @@ async function uploadImages(scope: Element, message: ComposerMessage): Promise<b
   const pending = message.attachments.filter((file) => !attached.has(file.id));
   if (!pending.length) return true;
   const inputs = (root: ParentNode) => [...root.querySelectorAll<HTMLInputElement>("input[type='file']")]
-    .filter((input) => /image|\.jpg|\.jpeg|\.png|\.webp/i.test(input.accept));
+    .filter((input) => !input.disabled && /image|\.jpg|\.jpeg|\.png|\.webp/i.test(input.accept));
+  const previousInputs = new Set(inputs(document));
+  const currentScope = () => openComposerEditor()?.closest("[role='dialog'], form") ?? scope;
   let openedPhoto = false;
   if (!inputs(scope).length) {
     const triggers = [...scope.querySelectorAll<HTMLElement>("button,[role='button']")].filter((element) =>
-      visible(element) && /^(photo\/video|photos\/videos|ảnh\/video|ảnh và video|photo\/videos)$/i.test(labelOf(element))
+      visible(element) && /^(photo\s*\/\s*videos?|photos\s*\/\s*videos|ảnh\s*\/\s*video|ảnh và video)(?:$|[\s.,…])/i.test(labelOf(element))
     );
     if (triggers.length !== 1) return false;
     triggers[0].click();
     openedPhoto = true;
   }
   const input = await waitFor(() => {
-    const scoped = inputs(scope);
-    if (scoped.length === 1) return scoped[0];
+    const scoped = inputs(currentScope());
+    const compatible = scoped.filter((input) => pending.length === 1 || input.multiple);
+    if (compatible.length === 1) return compatible[0];
     if (scoped.length > 1 || !openedPhoto) return undefined;
     // Some Facebook layouts insert the picker input in a portal outside
     // the dialog. Only use it if opening Photo/video revealed one unique
     // image picker on the entire page.
-    const global = inputs(document);
+    const global = inputs(document).filter((input) => !previousInputs.has(input));
     return global.length === 1 ? global[0] : undefined;
   }, 6000);
   if (!input || (!input.multiple && pending.length > 1) || cancelled(message)) return false;
+  const failedBaseline = uploadAttempts.get(message.jobId);
+  if (failedBaseline && ([...currentScope().querySelectorAll<HTMLImageElement>("img")].some((image) => failedBaseline.get(image) !== image.src) || currentScope().querySelector("[role='progressbar'],[aria-busy='true']"))) return false;
   const transfer = new DataTransfer();
   for (const file of pending) {
     const match = /^data:(image\/(?:png|jpeg|webp));base64,(.+)$/.exec(file.dataUrl);
-    if (!match || match[1] !== file.mimeType) return false;
+    if (!match || match[1] !== file.mimeType || !(file.mimeType === "image/png" ? /\.png$/i : file.mimeType === "image/jpeg" ? /\.jpe?g$/i : /\.webp$/i).test(file.filename)) return false;
     const bytes = Uint8Array.from(atob(match[2]), (letter) => letter.charCodeAt(0));
-    transfer.items.add(new File([bytes], file.filename, { type: file.mimeType }));
+    const candidate = new File([bytes], file.filename, { type: file.mimeType });
+    try { const bitmap = await createImageBitmap(candidate); bitmap.close(); } catch { return false; }
+    transfer.items.add(candidate);
   }
-  const previousImages = new Map([...scope.querySelectorAll<HTMLImageElement>("img")].map((image) => [image, image.src]));
+  if (cancelled(message)) return false;
+  const previousImages = new Map([...currentScope().querySelectorAll<HTMLImageElement>("img")].map((image) => [image, image.src]));
+  uploadAttempts.set(message.jobId, previousImages);
   input.files = transfer.files;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
   input.dispatchEvent(new Event("change", { bubbles: true }));
-  for (const file of pending) attached.add(file.id);
-  uploadedFiles.set(message.jobId, attached);
   reportStage(message, "VERIFY_UPLOAD");
-  return Boolean(await waitFor(() => {
+  const success = Boolean(await waitFor(() => {
     if (cancelled(message)) return false;
-    const previews = [...scope.querySelectorAll<HTMLImageElement>("img")].filter((image) => visible(image) && previousImages.get(image) !== image.src);
+    scope = currentScope();
+    const previews = [...scope.querySelectorAll<HTMLImageElement>("img")].filter((image) => visible(image) && image.complete && image.naturalWidth > 0 && /^(blob:|data:image\/)/.test(image.src) && previousImages.get(image) !== image.src);
     const post = [...scope.querySelectorAll<HTMLElement>("button,[role='button']")].find((element) => /^(post|publish|đăng|đăng bài)$/i.test((element.getAttribute("aria-label") ?? element.innerText).trim()));
-    return previews.length >= attached.size && post && !post.matches(":disabled,[aria-disabled='true']") && !scope.querySelector("[role='progressbar'],[aria-busy='true']") ? true : undefined;
+    return previews.length >= pending.length && post && !post.matches(":disabled,[aria-disabled='true']") && !scope.querySelector("[role='progressbar'],[aria-busy='true']") ? true : undefined;
   }, 30_000));
+  if (success) {
+    // Only local blob/data previews are inspected; never read remote Facebook media.
+    // Match each preview to one distinct requested file before marking IDs.
+    const previews = [...scope.querySelectorAll<HTMLImageElement>("img")].filter((image) => previousImages.get(image) !== image.src && /^(blob:|data:image\/)/.test(image.src));
+    const digest = async (data: ArrayBuffer) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", data)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    const remaining = await Promise.all([...transfer.files].map(async (file) => ({ file, hash: await digest(await file.arrayBuffer()) })));
+    for (const preview of previews) {
+      try {
+        const bytes = await (await fetch(preview.src)).arrayBuffer();
+        const hash = await digest(bytes);
+        let match = remaining.findIndex((candidate) => candidate.hash === hash);
+        if (match === -1) {
+          // Facebook can re-encode local previews. Require identical decoded pixels,
+          // including a resize to the preview dimensions, rather than identical file bytes.
+          const previewPixels = await pixelDigest(new Blob([bytes]), preview.naturalWidth, preview.naturalHeight);
+          if (previewPixels) {
+            for (let index = 0; index < remaining.length; index++) {
+              if (await pixelDigest(remaining[index].file, preview.naturalWidth, preview.naturalHeight) === previewPixels) { match = index; break; }
+            }
+          }
+        }
+        if (match === -1) { message.uploadError = "UPLOAD_PREVIEW_UNVERIFIED"; return false; }
+        remaining.splice(match, 1);
+      } catch { message.uploadError = "UPLOAD_PREVIEW_UNVERIFIED"; return false; }
+    }
+    if (remaining.length || cancelled(message)) return false;
+    for (const file of pending) attached.add(file.id);
+    uploadedFiles.set(message.jobId, attached);
+    verifiedPreviews.set(message.jobId, new Map(previews.map((image) => [image, image.src])));
+    uploadAttempts.delete(message.jobId);
+  }
+  if (!success && !cancelled(message)) {
+    const shown = [...currentScope().querySelectorAll<HTMLImageElement>("img")].filter((image) => visible(image) && image.complete && image.naturalWidth > 0 && previousImages.get(image) !== image.src);
+    if (shown.length >= pending.length) message.uploadError = "UPLOAD_PREVIEW_UNVERIFIED";
+  }
+  return success;
 }
 
-function notices(): string[] { return [...document.querySelectorAll<HTMLElement>("[role='status'],[role='alert'],[aria-live='polite']")].filter(visible).map((element) => element.innerText.trim()); }
+function notices(): string[] { return [...document.querySelectorAll<HTMLElement>("[role='status'],[role='alert'],[aria-live='polite']")].filter((element) => visible(element) && !element.closest("[role='feed'],[role='article'],article")).map((element) => element.innerText.trim()); }
 
 async function outcome(previous: Set<string>, message: ComposerMessage): Promise<"published" | "approval" | "unknown"> {
-  return await waitFor(() => {
-    if (cancelled(message)) return "unknown" as const;
-    for (const notice of notices().filter((text) => !previous.has(text))) {
-      if (/submitted for approval|pending admin approval|chờ (quản trị viên )?(phê duyệt|duyệt)/i.test(notice)) return "approval" as const;
-      if (/your post (has been |was )?(published|posted)|post published|bài viết (của bạn )?(đã )?(được đăng|đã đăng)|đã đăng bài/i.test(notice)) return "published" as const;
-    }
+  const collected = new Set<string>();
+  const collect = () => { for (const text of notices()) if (!previous.has(text)) collected.add(text); };
+  const observer = new MutationObserver(collect);
+  observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+  let candidate: "published" | "approval" | "unknown" | undefined;
+  let since = 0;
+  try { return await waitFor(() => {
+    if (cancelled(message) || (message.expectedGroupUrl && groupPath(location.href) !== groupPath(message.expectedGroupUrl))) return "unknown" as const;
+    if (/\/(login|checkpoint)(\/|$)/i.test(location.pathname) || document.querySelector("input[name='pass']")) return "unknown" as const;
+    collect();
+    const classification = classifyPostSignals([...collected]);
+    const result = classification === "PUBLISHED_CONFIRMED" ? "published" : classification === "PENDING_APPROVAL" ? "approval" : classification === "UNKNOWN" ? undefined : "unknown";
+    // Wait briefly for contradictory notices and asynchronous Facebook reconciliation.
+    if (result !== candidate) { candidate = result; since = Date.now(); }
+    if (candidate && Date.now() - since >= 600) return candidate;
     return undefined;
   }, 30_000) ?? "unknown";
+  } finally { observer.disconnect(); }
 }
 
 async function handle(message: ComposerMessage): Promise<AdapterResult> {
+  if (message.jobId) message.generation = jobGenerations.get(message.jobId) ?? 0;
+  if (message.type === "PREPARE_CAPTION" && message.jobId && attemptedJobs.has(message.jobId)) return { ok: false, clicked: true, reason: "ALREADY_SUBMITTED", message: "Review the previous Facebook post before continuing." };
   if (/\/(login|checkpoint|recover|identify)(\/|$)/i.test(location.pathname) || document.querySelector("input[name='pass']")) {
     return { ok: false, clicked: false, reason: "VERIFICATION_REQUIRED", message: "Facebook requires user verification. Please complete it directly on Facebook and retry." };
   }
@@ -276,6 +382,9 @@ async function handle(message: ComposerMessage): Promise<AdapterResult> {
     return { ok: false, clicked: false, reason: "WRONG_GROUP", message: "Open the exact Facebook Group for this job before continuing." };
   }
   if (cancelled(message)) return { ok: false, clicked: false, message: "Automatic posting was stopped." };
+  if (message.jobId) {
+    for (const oldId of uploadScopes.keys()) if (oldId !== message.jobId) clearUploadState(oldId);
+  }
   const publish = message.type === "PUBLISH_POST";
   if (publish && (!message.jobId || !message.expectedGroupUrl)) return { ok: false, clicked: false, reason: "INVALID_JOB" };
   if (publish && attemptedJobs.has(message.jobId!)) return { ok: false, clicked: true, reason: "ALREADY_SUBMITTED", message: "A publish attempt was already sent. Check Facebook before confirming the result." };
@@ -293,7 +402,7 @@ async function handle(message: ComposerMessage): Promise<AdapterResult> {
   }
   if (message.attachments?.length) {
     reportStage(message, "ATTACH_IMAGES");
-    if (!scope || !(await attachImages(scope, message))) return { ok: false, clicked: false, message: "Images could not be attached or did not finish uploading. Automatic posting was paused." };
+    if (!scope || !(await attachImages(scope, message))) return { ok: false, clicked: false, reason: message.uploadError ?? "UPLOAD_FAILED", message: message.uploadError === "UPLOAD_PREVIEW_UNVERIFIED" ? "Facebook shows images, but their previews could not be verified. Do not upload them again; review the post manually." : "Images could not be attached or did not finish uploading. Automatic posting was paused." };
   }
   if (!publish) {
     reportStage(message, "PREPARED");
@@ -319,7 +428,9 @@ async function handle(message: ComposerMessage): Promise<AdapterResult> {
 // A small, read-only on-page indicator survives the popup closing when Chrome
 // switches to the Facebook tab. Never label it as a Facebook notification.
 const PROGRESS_ID = "groupflow-progress-indicator";
+let latestProgress: ComposerMessage | undefined;
 function renderProgress(message: ComposerMessage): void {
+  latestProgress = message;
   document.getElementById(PROGRESS_ID)?.remove();
   if (!message.enabled && !message.error) return;
   if (!document.body) return;
@@ -352,10 +463,19 @@ function renderProgress(message: ComposerMessage): void {
   document.body.append(panel);
 }
 
+// Facebook can replace page containers after submitting a post. Restore the
+// indicator when that removes it, while retaining the latest worker state.
+new MutationObserver(() => {
+  if (latestProgress && (latestProgress.enabled || latestProgress.error) &&
+      document.body && !document.getElementById(PROGRESS_ID)) renderProgress(latestProgress);
+}).observe(document.documentElement, { childList: true, subtree: true });
+
 type UserPostWatcher = { jobId: string; detach: () => void };
 let postWatcher: UserPostWatcher | undefined;
 
 function armUserPost(message: ComposerMessage): AdapterResult {
+  if (message.jobId) message.generation = jobGenerations.get(message.jobId) ?? 0;
+  if (message.jobId && attemptedJobs.has(message.jobId)) return { ok: false, clicked: true, reason: "ALREADY_SUBMITTED" };
   if (!message.jobId || !message.expectedGroupUrl || groupPath(location.href) !== groupPath(message.expectedGroupUrl))
     return { ok: false, clicked: false, message: "The Facebook group changed. Open the correct group." };
   if (cancelled(message)) return { ok: false, clicked: false, message: "Automatic posting was stopped." };
@@ -367,6 +487,8 @@ function armUserPost(message: ComposerMessage): AdapterResult {
   );
   if (matchingButtons().length !== 1)
     return { ok: false, clicked: false, message: "The Facebook Post button could not be identified. Review manually." };
+  const readyButton = matchingButtons()[0];
+  if (readyButton.matches(":disabled, [aria-disabled='true']") || dialog.querySelector("[role='progressbar'],[aria-busy='true']")) return { ok: false, clicked: false, reason: "POST_BUTTON_DISABLED", message: "Finish uploading images before reviewing the post." };
   postWatcher?.detach();
   let submitted = false;
   const onClick = (event: MouseEvent) => {
@@ -376,22 +498,28 @@ function armUserPost(message: ComposerMessage): AdapterResult {
     const button = target.closest<HTMLElement>("button, [role='button']");
     if (!button || !dialog.contains(button) || !matchingButtons().includes(button) ||
         button.matches(":disabled, [aria-disabled='true']")) return;
+    if (groupPath(location.href) !== groupPath(message.expectedGroupUrl!) || matchingButtons().length !== 1 || dialog.querySelector("[role='progressbar'],[aria-busy='true']")) return;
     submitted = true;
+    attemptedJobs.add(message.jobId!);
     // The user (not Groupflow) clicked Facebook's Post button. Record this
     // immediately, then inspect only fresh Facebook confirmation notices.
     const previousNotices = new Set(notices());
     document.removeEventListener("click", onClick, true);
     void (async () => {
       try {
+        const pendingOutcome = outcome(previousNotices, message);
         const accepted = await chrome.runtime.sendMessage({
           type: "USER_POST_CLICKED", jobId: message.jobId,
-        }) as { ok?: boolean };
-        if (!accepted?.ok) return;
-        const result = await outcome(previousNotices, message);
-        await chrome.runtime.sendMessage({
+        }) as { ok?: boolean; error?: string };
+        if (!accepted?.ok) throw new Error(accepted?.error ?? "The Facebook action could not be completed. Check Facebook before trying again.");
+        const result = await pendingOutcome;
+        const recorded = await chrome.runtime.sendMessage({
           type: "USER_POST_RESULT", jobId: message.jobId, outcome: result,
-        });
-      } catch {
+        }) as { ok?: boolean; error?: string };
+        if (!recorded?.ok) throw new Error(recorded?.error ?? "The Facebook action could not be completed. Check Facebook before trying again.");
+      } catch (cause) {
+        renderProgress({ phase: "PAUSED", enabled: false,
+          error: cause instanceof Error ? cause.message : "Extension request failed." });
         // On a service-worker restart the durable job stays awaiting review.
         // We never assume a click means Facebook published the post.
       } finally { if (postWatcher?.jobId === message.jobId) postWatcher = undefined; }
@@ -403,7 +531,10 @@ function armUserPost(message: ComposerMessage): AdapterResult {
 }
 
 chrome.runtime.onMessage.addListener((message: ComposerMessage, _sender, sendResponse) => {
-  if (message.type === "PING") { sendResponse({ ok: true }); return; }
+  if (message.type === "PING") {
+    sendResponse({ ok: true, url: location.href, readyState: document.readyState, watchingJobId: postWatcher?.jobId });
+    return;
+  }
   if (message.type === "RESET_SAFE_JOB") {
     if (!message.jobId || attemptedJobs.has(message.jobId)) {
       sendResponse({ ok: false }); return;
@@ -415,6 +546,13 @@ chrome.runtime.onMessage.addListener((message: ComposerMessage, _sender, sendRes
   if (message.type === "ARM_USER_POST") { sendResponse(armUserPost(message)); return; }
   if (message.type === "CANCEL_JOB" && message.jobId) {
     cancelledJobs.add(message.jobId);
+    jobGenerations.set(message.jobId, (jobGenerations.get(message.jobId) ?? 0) + 1);
+    uploadResults.delete(message.jobId);
+    uploadedFiles.delete(message.jobId);
+    uploadScopes.delete(message.jobId);
+    uploadAttempts.delete(message.jobId);
+    verifiedPreviews.delete(message.jobId);
+    if (preparedJob?.id === message.jobId) preparedJob = undefined;
     if (postWatcher?.jobId === message.jobId) { postWatcher.detach(); postWatcher = undefined; }
     sendResponse({ ok: true }); return;
   }

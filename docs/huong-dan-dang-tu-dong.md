@@ -1,30 +1,28 @@
-# Đăng tự động tối đa 3 nhóm
+# Chuẩn bị bài viết theo chiến dịch, người dùng tự bấm Đăng
 
-## Chuẩn bị
+## Chuẩn bị và cập nhật tiện ích
 
-1. Trong ứng dụng, vào Nội dung, tạo bài viết và tải ảnh PNG, JPG hoặc WebP lên.
-2. Vào Chiến dịch, chọn bài viết đó và chọn từ 1 đến 3 nhóm bạn muốn đăng. Đặt khoảng cách giữa các bài rồi tạo chiến dịch.
-3. Mở `chrome://extensions`. Bật Developer mode. Nếu chưa cài tiện ích, chọn Load unpacked và chọn thư mục `D:\code\fb-group\extension\dist`.
-4. Nếu đã cài, bấm Reload của tiện ích. Bản mới cần quyền `alarms` để chạy lịch. Tải lại các tab Facebook đang mở.
-5. Vào Cài đặt trong ứng dụng, tạo mã ghép nối. Mở tiện ích, nhập địa chỉ ứng dụng và mã. Khi chạy trên máy, dùng `http://localhost:3000`.
-6. Đăng nhập Facebook trực tiếp trong Chrome và giữ Chrome mở trong lúc chạy.
+1. Tạo nội dung và ảnh PNG, JPEG hoặc WebP; chọn các nhóm bạn có quyền đăng và đặt lịch/khoảng cách phù hợp. Không có giới hạn cứng ba nhóm.
+2. Chạy `npm run extension:build`.
+3. Mở `chrome://extensions`, chọn Reload tiện ích đã cài từ `extension/dist` (hoặc Load unpacked khi cài lần đầu).
+4. Refresh các tab Facebook. Deploy web app không cập nhật extension unpacked.
+5. Ghép nối bằng mã trong Cài đặt. Đăng nhập Facebook trực tiếp trên Chrome; không cung cấp mật khẩu/cookie cho Groupflow.
 
-## Bắt đầu
+## Chạy và xác minh
 
-1. Chọn Tiếng Việt trong tiện ích.
-2. Bấm **Tải lại chiến dịch** và chọn chiến dịch vừa tạo.
-3. Bấm **Bắt đầu đăng tự động**.
+1. Chọn chiến dịch, bấm **Bắt đầu chuẩn bị bài**.
+2. Tiện ích mở nhóm đến hạn, điền caption, gắn ảnh và kiểm tra preview.
+3. Kiểm tra nội dung/ảnh, rồi **tự bấm Đăng trên Facebook**. Tiện ích không tự bấm Đăng trong chiến dịch.
+4. Chỉ tín hiệu xác nhận đăng đáng tin cậy mới ghi thành công và chuyển nhóm tiếp theo khi đến lịch.
+5. Chờ quản trị viên duyệt, mất mạng hoặc kết quả chưa rõ: giữ tạm dừng, không bấm Đăng lần nữa. Chỉ chọn **Tôi xác nhận bài đã được đăng** sau khi kiểm tra bài thực tế trong nhóm.
 
-Tiện ích mở nhóm đến hạn, điền nội dung, gắn ảnh, chờ tải ảnh và bấm Đăng. Khi thấy thông báo xác nhận đăng mới, tiện ích ghi lịch sử rồi chờ nhóm kế tiếp. Lịch được kiểm tra khoảng mỗi phút, nên thời điểm thực tế có thể muộn hơn thời điểm đã đặt.
+## Dừng và phục hồi
 
-Mỗi chiến dịch tự động chỉ được chọn tối đa 3 nhóm. Mỗi lượt cũng dừng sau tối đa 3 lần gửi yêu cầu đăng.
+- **Dừng theo dõi** dừng local monitoring; không hủy chiến dịch trên server.
+- **Hủy chiến dịch** ngăn claim nhóm tiếp theo; không thu hồi bài Facebook đã nhận.
+- **Reset nhóm lỗi** chỉ đặt FAILED về READY. Không reset POSTED, AWAITING_CONFIRMATION hoặc bài chờ duyệt.
+- Reload tab/service worker khi có reservation: kiểm tra Facebook thủ công; tiện ích không tự gửi lại. Nếu chưa hề bấm Đăng nhưng đã reserve, giữ manual review thay vì tự reset.
+- Upload thất bại có thể retry khi chắc chắn không có preview mới/tải đang chạy. Preview một phần, ảnh đã chỉnh sửa hoặc ảnh không nhận diện được: kiểm tra thủ công để tránh gắn trùng.
+- Copy caption vẫn dùng được khi editor Facebook không giữ định dạng.
 
-## Khi cần dừng hoặc xử lý lỗi
-
-- Bấm **Dừng đăng tự động** để ngừng các lần đăng tiếp theo. Nút này không thu hồi bài đã gửi.
-- Nếu Facebook yêu cầu đăng nhập hoặc xác minh, thực hiện trực tiếp trên Facebook.
-- Nếu ảnh không tải xong, không tìm được nút Đăng, bài chờ quản trị viên duyệt hoặc chưa xác định được kết quả, tiện ích dừng để bạn kiểm tra.
-- Với lần đăng chưa rõ kết quả, kiểm tra nhóm trước khi dùng **Tôi đã đăng bài**, **Bỏ qua nhóm** hoặc **Báo lỗi**. Tiện ích giữ bài đó và không tự bấm Đăng lại.
-- Nếu chiến dịch đang tạm dừng, tiếp tục chiến dịch trong ứng dụng trước khi bắt đầu lại ở tiện ích.
-
-Các kiểm thử tự động dùng trang Facebook giả lập. Giao diện Facebook thật vẫn cần kiểm tra trực tiếp vì vị trí và nhãn của các điều khiển có thể khác.
+Các kiểm thử dùng Facebook DOM giả lập và popup/service worker extension thật. **LIVE FACEBOOK: NOT TESTED** trong lượt sửa này; không có bài đăng Facebook thật.

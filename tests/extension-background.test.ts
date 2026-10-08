@@ -4,7 +4,7 @@ import { webcrypto } from "node:crypto";
 import { transpileModule, ScriptTarget, ModuleKind } from "typescript";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-type Message = { type: string; apiUrl?: string; code?: string; mediaId?: string; jobId?: string; mediaConfirmed?: boolean; campaignId?: string; outcome?: string };
+type Message = { type: string; enabled?: boolean; apiUrl?: string; code?: string; mediaId?: string; jobId?: string; mediaConfirmed?: boolean; campaignId?: string; outcome?: string };
 type Result = { ok: boolean; error?: string; job?: unknown; dataUrl?: string };
 type Listener = (message: Message, sender: unknown, reply: (value: Result) => void) => boolean;
 const campaignId = "11111111-1111-4111-8111-111111111111";
@@ -18,19 +18,23 @@ const tabMessage = vi.fn();
 const queryTabs = vi.fn();
 let alarmListener: (alarm: { name: string }) => void;
 let tabUrl: string;
+let tabStatus: string;
 const clearAlarm = vi.fn();
 
 beforeEach(() => {
   vi.resetAllMocks();
   tabUrl = job.group.url;
+  tabStatus = "complete";
   createTab.mockImplementation(async ({ url }: { url: string }) => { tabUrl = url; return { id: 1, url, status: "complete" }; });
   saved = { apiUrl: "http://localhost:3000", deviceToken: token, job };
-  tabMessage.mockResolvedValue({ ok: true, clicked: true });
+  tabMessage.mockImplementation(async (_tab: number, message: { type: string }) => message.type === "PING"
+    ? { ok: true, url: tabUrl, readyState: "interactive" }
+    : { ok: true, clicked: true });
   queryTabs.mockResolvedValue([{ id: 1, url: job.group.url }]);
   const source = readFileSync("extension/src/background/index.ts", "utf8");
   const output = transpileModule(source, { compilerOptions: { target: ScriptTarget.ES2022, module: ModuleKind.None } }).outputText;
   runInNewContext(output, {
-    URL, Response, Uint8Array, setTimeout, clearTimeout, crypto: webcrypto, fetch: fetchMock,
+    URL, Response, Error, Uint8Array, setTimeout, clearTimeout, crypto: webcrypto, fetch: fetchMock,
     btoa: (value: string) => Buffer.from(value, "binary").toString("base64"),
     chrome: {
       storage: { local: {
@@ -40,7 +44,7 @@ beforeEach(() => {
       } },
       alarms: { create: vi.fn(), clear: clearAlarm, onAlarm: { addListener: (handler: typeof alarmListener) => { alarmListener = handler; } } },
       runtime: { onMessage: { addListener: (handler: Listener) => { listener = handler; } } },
-      tabs: { create: createTab, query: queryTabs, sendMessage: tabMessage, get: async () => ({ id: 1, url: tabUrl, status: "complete" }), update: async (_id: number, value: { url: string }) => { tabUrl = value.url; return { id: 1, url: value.url, status: "complete" }; } },
+      tabs: { create: createTab, query: queryTabs, sendMessage: tabMessage, get: async () => ({ id: 1, url: tabUrl, status: tabStatus }), update: async (_id: number, value: { url?: string }) => { if (value.url) tabUrl = value.url; return { id: 1, url: tabUrl, status: tabStatus }; } },
     },
   });
 });
@@ -157,7 +161,9 @@ describe("manual-confirmed automatic campaign (no three-group limit)", () => {
       if (path.includes("/media/")) return new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "image/png" } });
       return json({ allowed: true });
     });
-    tabMessage.mockResolvedValue({ ok: true });
+    tabMessage.mockImplementation(async (_tab: number, message: { type: string }) => message.type === "PING"
+      ? { ok: true, url: tabUrl, readyState: "interactive" }
+      : { ok: true });
   }
   it("prepares each group for user Post click; confirms and proceeds through four groups", async () => {
     configure();
@@ -178,6 +184,54 @@ describe("manual-confirmed automatic campaign (no three-group limit)", () => {
     expect(prepared.attachments).toEqual([expect.objectContaining({ filename: "image.png", dataUrl: "data:image/png;base64,AQID" })]);
     expect(tabMessage.mock.calls.filter((call) => call[1].type === "PUBLISH_POST")).toHaveLength(0);
   });
+  it("prepares a usable group while Chrome still reports loading", async () => {
+    configure();
+    tabStatus = "loading";
+    await send({ type: "AUTO_START", campaignId });
+    await vi.waitFor(() => expect(saved.automatic).toMatchObject({ phase: "AWAITING_USER", enabled: true }));
+    expect(tabMessage).toHaveBeenCalledWith(1, expect.objectContaining({ type: "PREPARE_CAPTION" }));
+  });
+  it("ignores the legacy preference until the new Post switch is enabled", async () => {
+    configure();
+    saved.autoPublish = true;
+    await send({ type: "AUTO_START", campaignId });
+    await vi.waitFor(() => expect(saved.automatic).toMatchObject({ phase: "AWAITING_USER" }));
+    expect(tabMessage.mock.calls.some((call) => call[1].type === "PUBLISH_POST")).toBe(false);
+  });
+
+  it.each(["unknown", "approval"])("opt-in automatic Post pauses on %s without submitting again", async (outcome) => {
+    configure();
+    expect((await send({ type: "AUTO_SET_PUBLISH", enabled: true })).ok).toBe(true);
+    tabMessage.mockImplementation(async (_tab: number, message: { type: string }) => message.type === "PING" ? { ok: true, url: tabUrl, readyState: "interactive" } : message.type === "PUBLISH_POST" ? { ok: true, clicked: true, outcome } : { ok: true });
+    await send({ type: "AUTO_START", campaignId });
+    await vi.waitFor(() => expect(saved.automatic).toMatchObject({ phase: "PAUSED", enabled: false }));
+    expect(saved.job).toMatchObject({ publishAttempted: true, userClicked: true });
+    expect(tabMessage.mock.calls.filter((call) => call[1].type === "PUBLISH_POST")).toHaveLength(1);
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/posted"))).toBe(false);
+    expect(fetchMock.mock.calls.some((call) => JSON.parse(String(call[1]?.body ?? "{}" )).clickSource === "automatic")).toBe(true);
+    expect((await send({ type: "AUTO_START", campaignId })).ok).toBe(false);
+    expect((await send({ type: "AUTO_SET_PUBLISH", enabled: false })).ok).toBe(false);
+  });
+  it("allows toggling off before starting and rejects a tab changing the preference", async () => {
+    configure();
+    expect((await send({ type: "AUTO_SET_PUBLISH", enabled: true }, { tab: { id: 1 } })).ok).toBe(false);
+    expect((await send({ type: "AUTO_SET_PUBLISH", enabled: true })).ok).toBe(true);
+    expect((await send({ type: "AUTO_SET_PUBLISH", enabled: false })).ok).toBe(true);
+    await send({ type: "AUTO_START", campaignId });
+    await vi.waitFor(() => expect(saved.automatic).toMatchObject({ phase: "AWAITING_USER", autoClickPost: false }));
+    expect((await send({ type: "AUTO_SET_PUBLISH", enabled: true })).ok).toBe(false);
+    expect(tabMessage.mock.calls.some((call) => call[1].type === "PUBLISH_POST")).toBe(false);
+  });
+  it("waits for the new document instead of trusting an old group's adapter", async () => {
+    configure();
+    let pings = 0;
+    tabMessage.mockImplementation(async (_tab: number, message: { type: string }) => message.type === "PING"
+      ? { ok: true, url: ++pings === 1 ? job.group.url : tabUrl, readyState: "interactive" }
+      : { ok: true });
+    await send({ type: "AUTO_START", campaignId });
+    await vi.waitFor(() => expect(saved.automatic).toMatchObject({ phase: "AWAITING_USER" }), { timeout: 2000 });
+    expect(pings).toBe(2);
+  });
   it.each(["unknown", "approval"])("stops on %s and does not record success", async (outcome) => {
     configure();
     await send({ type: "AUTO_START", campaignId });
@@ -188,6 +242,17 @@ describe("manual-confirmed automatic campaign (no three-group limit)", () => {
     await vi.waitFor(() => expect(saved.automatic).toMatchObject({ enabled: false, phase: "PAUSED" }));
     expect(saved.job).toMatchObject({ publishAttempted: true });
     expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/posted"))).toBe(false);
+  });
+  it("shows a recording failure instead of silently staying in verification", async () => {
+    configure();
+    await send({ type: "AUTO_START", campaignId });
+    await vi.waitFor(() => expect(saved.automatic).toMatchObject({ phase: "AWAITING_USER" }));
+    const current = saved.job as { id: string };
+    await send({ type: "USER_POST_CLICKED", jobId: current.id }, { tab: { id: 1 } });
+    fetchMock.mockRejectedValue(new Error("Connection lost while recording publication"));
+    expect(await send({ type: "USER_POST_RESULT", jobId: current.id, outcome: "published" }, { tab: { id: 1 } })).toMatchObject({ ok: false });
+    expect(saved.automatic).toMatchObject({ enabled: false, phase: "PAUSED", error: "Connection lost while recording publication" });
+    expect(saved.job).toMatchObject({ id: current.id, publishAttempted: true });
   });
   it("rejects forged or wrong-tab submission events", async () => {
     configure();
@@ -224,7 +289,7 @@ describe("manual-confirmed automatic campaign (no three-group limit)", () => {
     tabMessage.mockImplementation(async (_tab: number, message: { type: string }) =>
       message.type === "PREPARE_CAPTION"
         ? new Promise((resolve) => { finish = resolve; })
-        : { ok: true }
+        : message.type === "PING" ? { ok: true, url: tabUrl, readyState: "interactive" } : { ok: true }
     );
     await send({ type: "AUTO_START", campaignId });
     await vi.waitFor(() => expect(tabMessage).toHaveBeenCalledWith(1, expect.objectContaining({ type: "PREPARE_CAPTION" })));
@@ -242,4 +307,19 @@ it("keeps the local attempt locked when the server cannot release a no-click res
   expect(saved.job).toMatchObject({ publishAttempted: true });
   expect((await send({ type: "PUBLISH", jobId: job.id })).ok).toBe(false);
   expect(tabMessage).toHaveBeenCalledTimes(1);
+});
+
+it("worker restart pauses an uncertain post instead of starting another group", async () => {
+  saved.automatic = { runId: "restart", campaignId, enabled: true, phase: "AWAITING_USER", attempts: 1, tabId: 1, jobId: job.id };
+  saved.job = { ...job, publishAttempted: true };
+  alarmListener({ name: "groupflow-automatic" });
+  await vi.waitFor(() => expect(saved.automatic).toMatchObject({ enabled: false, phase: "PAUSED" }));
+  expect(saved.job).toMatchObject({ publishAttempted: true });
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it("manual prepare cannot refill a reserved or uncertain job", async () => {
+  saved.job = { ...job, publishAttempted: true };
+  expect((await send({ type: "PREPARE" })).ok).toBe(false);
+  expect(tabMessage).not.toHaveBeenCalled();
 });

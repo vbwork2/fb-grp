@@ -91,3 +91,6 @@ it("schedules posts two seconds apart and accepts intervals above one day", () =
   expect(long[1].scheduledAt.getTime() - long[0].scheduledAt.getTime()).toBe(100000000);
   expect(() => buildQueuePlan({ ...input, minIntervalSeconds: 1, maxIntervalSeconds: 2 })).toThrow(/interval/);
 });
+it("never resets or skips an uncertain submission", () => {
+  for (const status of ["READY", "FAILED", "SKIPPED"] as const) expect(() => assertQueueTransition("AWAITING_CONFIRMATION", status)).toThrow();
+});

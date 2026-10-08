@@ -83,6 +83,7 @@
           <p id="campaignHint" class="hint" data-i18n="Posts are prepared one group at a time. You click Post on Facebook.">Posts are prepared one group at a time. You click Post on Facebook.</p>
           <div style="height:16px"></div>
           <span class="section-title" data-i18n="2. Start posting">2. Start posting</span>
+          <label class="checkbox-label"><input id="autoClickPost" type="checkbox" role="switch" /><span data-i18n="Automatically click Post">Automatically click Post</span></label>
           <div class="action-row"><button id="autoStart" class="primary" disabled data-i18n="Start preparing posts">Start preparing posts</button><button id="autoStop" class="secondary" disabled data-i18n="Stop monitoring">Stop monitoring</button></div>
           <div class="action-row"><button id="autoConfirm" class="hidden primary" data-i18n="I verified this post is published">I verified this post is published</button></div>
           <div class="action-row"><button id="autoReset" class="hidden" data-i18n="Reset failed groups">Reset failed groups</button><button id="autoCancel" class="hidden" data-i18n="Cancel campaign">Cancel campaign</button></div>
@@ -98,7 +99,7 @@
             <div id="autoStep1" class="step" data-i18n="Open group">Open group</div><div id="autoStep2" class="step" data-i18n="Prepare post">Prepare post</div><div id="autoStep3" class="step" data-i18n="Click Post & verify">Click Post & verify</div>
           </div>
           <button id="autoOpen" class="hidden" data-i18n="Open current Facebook Group">Open current Facebook Group</button>
-          <p id="autoHelp" class="hint" data-i18n="Groupflow never clicks Post for you. Review the post, click Post on Facebook, and wait for confirmation.">Groupflow never clicks Post for you. Review the post, click Post on Facebook, and wait for confirmation.</p>
+          <p id="autoHelp" class="hint" >Off: review each prepared post and click Post on Facebook.</p>
         </div>
         <div class="panel">
           <details id="manualDetails"><summary data-i18n="Advanced: manual posting and recovery">Advanced: manual posting and recovery</summary>
@@ -112,6 +113,7 @@
                 <button id="open" class="hidden" data-i18n="Open group">Open group</button>
                 <button id="prepare" class="hidden" data-i18n="Prepare caption">Prepare caption</button>
                 <button id="copy" class="hidden" data-i18n="Copy caption">Copy caption</button>
+                <span id="debugErrorCode" class="hint"></span>
                 <button id="publish" class="primary hidden" data-i18n="Publish to Facebook">Publish to Facebook</button>
                 <button id="posted" class="hidden" data-i18n="I posted it">I posted it</button>
                 <button id="skip" class="hidden" data-i18n="Skip group">Skip group</button>
