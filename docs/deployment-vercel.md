@@ -100,6 +100,8 @@ npx vercel deploy --prod
 
 Confirm the production APP_URL and every secret without printing values, complete the final image copy, and run the verification checklist before moving traffic. Production deployment was not automatically authorized by the migration request.
 
+The repository may still have its old Netlify Git integration and deploy-preview required check. A Vercel migration branch can fail that superseded provider check. After approved Vercel cutover, disable the old automatic Netlify builds and update branch protection to use the intended Vercel/GitHub checks. Do not delete the old deployment or store needed for rollback.
+
 Keep the prior deployment, Netlify storage and database backup available. Roll back the Vercel deployment or DNS to the known-good version if verification fails. Do not roll back the schema or delete new data. Netlify will not see images created only in Vercel Blob after cutover: pause writes and reconcile those objects safely before reverting traffic to Netlify. Re-pair the local extension if the app origin changes. Rollback across storage providers needs a deliberate data reconciliation window.
 
 ## Common errors

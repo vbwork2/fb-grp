@@ -36,6 +36,10 @@ The first browser run had 93 passes, one failure and four live-data skips. The f
 
 Auth/API coverage uses disposable in-memory PostgreSQL, the unchanged schema/migrations, actual signed-session/password code and mocked email/storage boundaries. It covers registration, login/logout, production cookie flags, rate limiting, one-use reset and session invalidation, one-use pairing, hashed tokens, expiry/revocation, upload/retrieval, workspace isolation, queue transitions and Stop/Cancel/Reset. Blob SDK calls are mocked for contract tests; this does not certify a live store.
 
+## Pull request checks
+
+Draft PR: https://github.com/vbwork2/fb-grp/pull/6. GitHub validation is running. The old Netlify integration also ran and its deploy-preview check failed; provider build logs were not available through the GitHub CLI, so its exact failure cause is not asserted. This is not a Vercel preview. Keep the legacy deployment/store for rollback, and disable automatic Netlify builds/update required provider checks only as part of the approved cutover.
+
 ## Remaining setup and limitations
 
 Vercel CLI 63.1.0 reports Logged out. No project link or Blob credentials were available, so no preview/production URL is claimed. Sign in with npx vercel login; link the intended single project rooted at .; privately configure Preview secrets and a private store, then deploy and verify Preview. Production deployment requires explicit approval after preview verification.
