@@ -8,10 +8,10 @@ Date: 2026-10-08. Runtime: Windows 11, Node.js 24, local Next.js server connecte
 | --- | --- |
 | `npm run typecheck` | Passed |
 | `npm run lint` | Passed |
-| `npm run test` | 47 passed |
-| `npm run test:acceptance` | 19 passed; includes extension build |
+| `npm run test` | 48 passed |
+| `npm run test:acceptance` | 23 passed; includes extension build |
 | `npm run build` | Passed |
-| `npm audit` | 0 known vulnerabilities |
+| `npm audit` | Previous report: 0 known vulnerabilities; not rerun in this repair pass |
 
 ## Coverage
 
@@ -49,6 +49,15 @@ Live acceptance tests create temporary accounts and a disposable schema, then cl
 - Extension build now emits one canonical manifest, including the alarms permission needed for automatic scheduling.
 - Repeated image preparation shares the upload result instead of treating an unfinished upload as ready.
 - Uncertain submissions remain reserved and block fetching another local job until reviewed.
+
+## Posting repair verification
+
+- Removed duplicate translation keys that caused TS1117 and blocked builds.
+- Manual extension publishing now reserves AWAITING_CONFIRMATION on the server before clicking Facebook, matching the automatic flow. A no-click response releases the reservation; a failed release keeps the local attempt locked.
+- The adapter waits for delayed composer rendering and checks cancellation before opening a newly rendered trigger or filling the editor.
+- Typecheck, lint, 48 unit tests, production build, extension build and 23 live acceptance tests passed. The final adapter build also passed all 17 targeted browser tests.
+- Chromium acceptance verified automatic image attachment, publication confirmation, history and completion across two controlled Facebook Group pages. No post was sent to real Facebook.
+- Reload the unpacked extension from extension/dist and reload Facebook tabs before using the repaired build.
 
 ## Remaining checks and scope
 

@@ -94,7 +94,7 @@ npm run test:acceptance
 npm run extension:build
 ```
 
-Vitest runs 47 security, queue, database and extension tests. With `.env.local` configured and `npm run dev` running in another terminal, `npm run test:acceptance` builds the extension and runs 19 Playwright checks, including real Neon API workflows, concurrent device claims, a Chromium extension session, and isolated migrations/seed. Tests create temporary data and clean it afterward. Install Chromium first with `npx playwright install chromium` if needed. Default `npm run test:e2e` runs public/adapter checks and skips live database checks. See [verification report](docs/verification.md).
+Vitest runs 48 security, queue, database and extension tests. With `.env.local` configured and `npm run dev` running in another terminal, `npm run test:acceptance` builds the extension and runs 23 Playwright checks, including real Neon API workflows, concurrent device claims, a Chromium extension session, and isolated migrations/seed. Tests create temporary data and clean it afterward. Install Chromium first with `npx playwright install chromium` if needed. Default `npm run test:e2e` runs public/adapter checks and skips live database checks. See [verification report](docs/verification.md).
 
 ## Production deployment
 

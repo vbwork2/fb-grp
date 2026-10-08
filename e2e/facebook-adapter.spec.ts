@@ -131,3 +131,36 @@ test("ambiguous composer entry points do not trigger accidental clicks", async (
   await setup(page, '<button aria-label="Write something...">A</button><button aria-label="Write something...">B</button>');
   expect((await send(page, { type: "PREPARE_CAPTION", ...job })).reason).toBe("COMPOSER_NOT_FOUND");
 });
+
+test("prepare waits for the group composer to render after page load", async ({ page }) => {
+  await setup(page, "<main>Group feed is loading</main>");
+  await page.evaluate(() => setTimeout(() => {
+    const trigger = document.createElement("button");
+    trigger.textContent = "Write something...";
+    trigger.onclick = () => {
+      const dialog = document.createElement("div");
+      dialog.setAttribute("role", "dialog");
+      dialog.innerHTML = '<div role="textbox" contenteditable="true"></div><button class="post">Post</button>';
+      document.body.append(dialog);
+    };
+    document.body.append(trigger);
+  }, 600));
+  expect((await send(page, { type: "PREPARE_CAPTION", ...job })).ok).toBe(true);
+  await expect(page.getByRole("textbox")).toContainText("Reviewed caption");
+});
+
+test("stopping while the composer loads prevents caption changes", async ({ page }) => {
+  await setup(page, '<button id="compose">Write something...</button>');
+  await page.evaluate(() => {
+    document.getElementById("compose")!.onclick = () => setTimeout(() => {
+      const dialog = document.createElement("div");
+      dialog.setAttribute("role", "dialog");
+      dialog.innerHTML = '<div role="textbox" contenteditable="true"></div><button class="post">Post</button>';
+      document.body.append(dialog);
+    }, 600);
+  });
+  const pending = send(page, { type: "PREPARE_CAPTION", ...job });
+  await send(page, { type: "CANCEL_JOB", jobId: job.jobId });
+  expect(await pending).toMatchObject({ ok: false, clicked: false });
+  await expect(page.getByRole("textbox")).toBeEmpty();
+});

@@ -100,12 +100,13 @@ describe("Chrome Extension service worker", () => {
   });
 });
 
-it("publishes only after a valid claim check and does not report posted automatically", async () => {
-  fetchMock.mockResolvedValue(json({ allowed: true }));
+it("publishes only after a durable server reservation and does not report posted automatically", async () => {
+  fetchMock.mockImplementation(async () => json({ allowed: true }));
   expect((await send({ type: "PUBLISH", jobId: job.id })).ok).toBe(true);
-  expect(String(fetchMock.mock.calls[0][0])).toContain("/jobs/job-1/validate");
+  expect(String(fetchMock.mock.calls[0][0])).toContain("/jobs/job-1/submission");
   expect(tabMessage).toHaveBeenCalledWith(1, expect.objectContaining({ type: "PUBLISH_POST", jobId: job.id }));
   expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({ action: "begin", claimToken: job.claimToken });
   expect(saved.job).toMatchObject({ publishAttempted: true });
   expect((await send({ type: "PUBLISH", jobId: job.id })).ok).toBe(false);
   expect(tabMessage).toHaveBeenCalledTimes(1);
@@ -121,13 +122,14 @@ it("does not publish with an expired or revoked claim", async () => {
   expect(tabMessage).not.toHaveBeenCalled();
 });
 it("allows a corrected retry only when Facebook confirms no click occurred", async () => {
-  fetchMock.mockResolvedValue(json({ allowed: true }));
+  fetchMock.mockImplementation(async () => json({ allowed: true }));
   tabMessage.mockResolvedValue({ ok: false, clicked: false, message: "Button disabled" });
   expect((await send({ type: "PUBLISH", jobId: job.id })).ok).toBe(false);
   expect(saved.job).not.toHaveProperty("publishAttempted");
+  expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toMatchObject({ action: "release", claimToken: job.claimToken });
 });
 it("keeps uncertain attempts locked instead of submitting again", async () => {
-  fetchMock.mockResolvedValue(json({ allowed: true }));
+  fetchMock.mockImplementation(async () => json({ allowed: true }));
   tabMessage.mockRejectedValue(new Error("Tab closed"));
   expect((await send({ type: "PUBLISH", jobId: job.id })).ok).toBe(false);
   expect(saved.job).toMatchObject({ publishAttempted: true });
@@ -202,4 +204,13 @@ describe("approved three-group automatic run", () => {
     await vi.waitFor(() => expect(saved.automatic).toMatchObject({ enabled: false }));
     expect(tabMessage.mock.calls.some((call) => call[1].type === "PUBLISH_POST")).toBe(false);
   });
+});
+
+it("keeps the local attempt locked when the server cannot release a no-click reservation", async () => {
+  fetchMock.mockResolvedValueOnce(json({ allowed: true })).mockRejectedValueOnce(new Error("Connection lost"));
+  tabMessage.mockResolvedValue({ ok: false, clicked: false, message: "Button disabled" });
+  expect((await send({ type: "PUBLISH", jobId: job.id })).ok).toBe(false);
+  expect(saved.job).toMatchObject({ publishAttempted: true });
+  expect((await send({ type: "PUBLISH", jobId: job.id })).ok).toBe(false);
+  expect(tabMessage).toHaveBeenCalledTimes(1);
 });

@@ -49,13 +49,21 @@ function composeTriggers(): HTMLElement[] {
   });
 }
 
-async function composer(): Promise<HTMLElement | undefined> {
+async function composer(message: ComposerMessage): Promise<HTMLElement | undefined> {
   const existing = openComposerEditor();
   if (existing) return existing;
-  const triggers = composeTriggers();
+  // Facebook can render its composer after the document has finished loading.
+  const entry = await waitFor(() => {
+    const editor = openComposerEditor();
+    if (editor) return { editor };
+    const triggers = composeTriggers();
+    return triggers.length ? { triggers } : undefined;
+  }, COMPOSER_TIMEOUT_MS);
+  if (!entry) return;
+  if ("editor" in entry) return entry.editor;
   // Never guess which trigger to click if the page is ambiguous.
-  if (triggers.length !== 1) return;
-  triggers[0].click();
+  if (entry.triggers.length !== 1 || cancelled(message)) return;
+  entry.triggers[0].click();
   // Polling a small set of dialogs avoids a full-page MutationObserver reacting
   // to Facebook's frequent feed updates and potentially stalling the tab.
   return waitFor(openComposerEditor, COMPOSER_TIMEOUT_MS);
@@ -156,8 +164,9 @@ async function handle(message: ComposerMessage): Promise<AdapterResult> {
   const publish = message.type === "PUBLISH_POST";
   if (publish && (!message.jobId || !message.expectedGroupUrl)) return { ok: false, clicked: false, reason: "INVALID_JOB" };
   if (publish && attemptedJobs.has(message.jobId!)) return { ok: false, clicked: true, reason: "ALREADY_SUBMITTED", message: "A publish attempt was already sent. Check Facebook before confirming the result." };
-  const editor = await composer();
+  const editor = await composer(message);
   if (!editor) return { ok: false, clicked: false, reason: "COMPOSER_NOT_FOUND", message: "Open the Facebook post composer, then retry. Copy and paste remains available." };
+  if (cancelled(message)) return { ok: false, clicked: false, message: "Automatic posting was stopped." };
   const scope = editor.closest("[role='dialog'], form");
   if (publish && !scope) return { ok: false, clicked: false, reason: "POST_BUTTON_NOT_FOUND", message: "Open the Facebook post dialog before publishing." };
   if (!publish || preparedJob?.id !== message.jobId || preparedJob?.editor !== editor) fill(editor, message);

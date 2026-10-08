@@ -99,11 +99,14 @@ chrome.runtime.onMessage.addListener((message: { type: string; apiUrl?: string; 
           if (job.content.media.length && !message.mediaConfirmed) throw new Error("Attach this job's images in Facebook and check Images attached before publishing.");
           publishing.add(job.id);
           try {
-            await api(`/api/extension/jobs/${job.id}/validate`, { claimToken: job.claimToken });
+            await api(`/api/extension/jobs/${job.id}/submission`, { claimToken: job.claimToken, action: "begin" });
             // Persist before the Facebook action, including uncertain connection outcomes.
             await chrome.storage.local.set({ job: { ...job, publishAttempted: true } });
             const result = await chrome.tabs.sendMessage(tab.id, { type: "PUBLISH_POST", jobId: job.id, expectedGroupUrl: job.group.url, caption: job.content.caption, linkUrl: job.content.linkUrl });
-            if (result?.clicked === false) await chrome.storage.local.set({ job });
+            if (result?.clicked === false) {
+              await api(`/api/extension/jobs/${job.id}/submission`, { claimToken: job.claimToken, action: "release" });
+              await chrome.storage.local.set({ job });
+            }
             if (!result?.ok) throw new Error(result?.message ?? "The Facebook action could not be completed. Check Facebook before trying again.");
             sendResponse({ ok: true, message: result.message });
           } finally { publishing.delete(job.id); }

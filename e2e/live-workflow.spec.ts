@@ -260,7 +260,7 @@ test("authenticated workflows, tenant isolation, device claims, and password res
         await expect(groupPage.locator("body")).toHaveAttribute("data-submissions", "1");
         await expect(popup.locator("#publish")).toBeDisabled();
         const [unconfirmed] = await sql`select status from queue_items where campaign_id=${campaign.id}`;
-        expect(unconfirmed.status).toBe("OPENED");
+        expect(unconfirmed.status).toBe("AWAITING_CONFIRMATION");
         await popup.locator("#posted").click();
         await expect(popup.locator("#status")).toHaveText("Post confirmed in history.");
         const [completed] = await sql`select status from campaigns where id=${campaign.id}`;
