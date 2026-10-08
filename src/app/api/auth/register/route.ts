@@ -1,3 +1,4 @@
+import { clientIp } from "@/lib/security/client-ip";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
@@ -12,7 +13,7 @@ const input = z.object({ email: z.string().email().max(320), password: z.string(
 
 export async function POST(request: Request) {
   if (!verifySameOrigin(request)) return jsonError("INVALID_ORIGIN", "Request origin is not allowed.", 403);
-  const ip = request.headers.get("x-nf-client-connection-ip") ?? "unknown";
+  const ip = clientIp(request);
   try {
     if (!(await checkRateLimit(`register:${ip}`, 5, 3600))) return jsonError("RATE_LIMITED", "Too many registration attempts.", 429);
   } catch {

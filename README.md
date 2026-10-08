@@ -7,9 +7,9 @@ The application never asks for Facebook credentials and never stores Facebook pa
 ## Architecture
 
 - Next.js App Router, TypeScript, React, and Tailwind CSS
-- Netlify hosting through its current OpenNext adapter
-- PostgreSQL with Drizzle ORM; Netlify Database or Neon through one connection configuration
-- Netlify Blobs for production images and local-only file storage in development
+- One Vercel project rooted at `.` with Next.js pages and API routes
+- Existing Neon PostgreSQL with Drizzle ORM and a small serverless connection pool
+- Private Vercel Blob for production images and local-only file storage in development
 - Manifest V3 Chrome Extension with all API calls in its service worker
 
 See [architecture](docs/architecture.md), [security](docs/security.md), and [workflow](docs/workflow.md).
@@ -18,7 +18,7 @@ See [architecture](docs/architecture.md), [security](docs/security.md), and [wor
 
 - Node.js 24 or later
 - npm
-- PostgreSQL for app data (Netlify Database or Neon)
+- Neon PostgreSQL for app data
 - Chrome for loading the unpacked extension
 
 ## Installation
@@ -28,7 +28,7 @@ npm install
 Copy-Item .env.example .env.local
 ```
 
-Set `AUTH_SECRET` to a random value of at least 32 characters. Set `DATABASE_URL` for local PostgreSQL or `NETLIFY_DB_URL` when using Netlify Database. For local direct development, set `DATABASE_PROVIDER=neon` and `DATABASE_URL`.
+Set `AUTH_SECRET` to a random value of at least 32 characters. Set `DATABASE_PROVIDER=neon` and `DATABASE_URL` to the existing Neon database (prefer its pooled connection URL). Production image storage requires a private Vercel Blob store and server-only credentials.
 
 ## Local development
 
@@ -37,7 +37,7 @@ npm run db:migrate
 npm run dev
 ```
 
-For a Netlify-like local runtime, link the site, initialize its database, then use `netlify dev`. Database-specific steps are in [docs/database.md](docs/database.md).
+Local development stores images in `.local-storage/media`. Database-specific steps are in [docs/database.md](docs/database.md).
 
 ## Application features
 
@@ -66,7 +66,7 @@ Facebook OAuth and Google OAuth are not included in this initial implementation.
 
 ## Database setup
 
-Configure either Netlify Database or Neon with `DATABASE_PROVIDER` and the corresponding connection variable. Generate and apply schema migrations with:
+Keep the existing Neon database with `DATABASE_PROVIDER=neon` and `DATABASE_URL`. No new schema migration is required for this hosting migration. Only generate migrations after actual schema changes:
 
 ```powershell
 npm run db:generate
@@ -81,7 +81,7 @@ For development sample data, set a development-only `SEED_PASSWORD` (10+ charact
 npm run extension:build
 ```
 
-Then open `chrome://extensions`, enable Developer mode, choose Load unpacked, and select `extension/dist`. Pair from the web app's Settings page. Custom app domains require their exact hostname to be added to `extension/manifest.json` before building. See [extension setup](docs/extension.md) and [Web Store readiness](docs/chrome-web-store.md).
+Then open `chrome://extensions`, enable Developer mode, choose Load unpacked, and select `extension/dist`. Pair from the web app's Settings page. Enter the exact application HTTPS URL when pairing and approve access to that domain. The popup requests only the selected origin. See [extension setup](docs/extension.md) and [Web Store readiness](docs/chrome-web-store.md).
 
 ## Running checks
 
@@ -98,14 +98,14 @@ Vitest includes disposable in-memory PostgreSQL API regression tests. Playwright
 
 ## Production deployment
 
-Connect the GitHub repository to Netlify. Netlify automatically provisions the supported Next.js runtime. Configure `AUTH_SECRET`, `APP_URL`, and either Netlify Database or Neon variables. See [deployment](docs/deployment.md) for the step-by-step setup.
+Import this repository into one Vercel Next.js project with Root Directory `.` and Node.js 24. Configure `AUTH_SECRET`, `APP_URL`, `DATABASE_URL` and private Blob credentials. See [Vercel deployment](docs/deployment-vercel.md) for preview, production, migration and rollback steps. The Chrome Extension is installed locally; it is not a Vercel service.
 
 ## Known limitations
 
 - This is an initial MVP implementation. It does not yet include optional OAuth, team invitations, profile avatars, or workspace default pacing.
 - Auth.js was not adopted; the application uses a small signed-cookie credential session implementation.
-- Custom-domain extension host permission must be explicitly added to the manifest before building.
-- Netlify runtime storage, actual reset email delivery and real Facebook composer behavior require deployed/manual verification. Browser coverage is broad but does not exhaust every filter, pagination and visual interaction.
+- Pairing requires approving the selected application origin; re-pair after moving domains.
+- Live Vercel private storage, actual reset email delivery and real Facebook composer behavior require deployed/manual verification. Browser coverage is broad but does not exhaust every filter, pagination and visual interaction.
 - Composer selectors can change as Facebook changes its interface. Composer population is best-effort and manual caption copy remains available.
 
 

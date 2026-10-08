@@ -1,3 +1,5 @@
+> Historical report: hosting details and prior test results describe an earlier revision. Current deployment instructions are in docs/deployment-vercel.md.
+
 # Facebook upload and publication repair
 
 ## Current AUTO policy: version 0.1.3

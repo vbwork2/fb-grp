@@ -23,6 +23,12 @@ on:
       - "src/app/api/media/**"
       - "src/lib/storage/**"
       - "package-lock.json"
+      - "package.json"
+      - "next.config.ts"
+      - "src/lib/security/**"
+      - "src/lib/db/connection.ts"
+      - "src/lib/db/index.ts"
+      - "src/app/api/auth/**"
       - "playwright.config.ts"
       - "e2e/live-workflow.spec.ts"
       - ".github/workflows/validate-extension.yml"
@@ -46,6 +52,13 @@ jobs:
         run: npm run lint
       - name: Run unit tests
         run: npm run test
+      - name: Build Next.js production app
+        run: npm run build
+        env:
+          AUTH_SECRET: isolated-ci-build-secret-at-least-32-characters
+          DATABASE_PROVIDER: neon
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/groupflow_ci
+          APP_URL: https://groupflow-ci.example.test
       - name: Build Chrome extension
         run: npm run extension:build
       - name: Install Chromium

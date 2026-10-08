@@ -1,3 +1,4 @@
+import { clientIp } from "@/lib/security/client-ip";
 import { createHash, randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -11,7 +12,7 @@ const input = z.object({ email: z.string().email().max(320) });
 
 export async function POST(request: Request) {
   if (!verifySameOrigin(request)) return jsonError("INVALID_ORIGIN", "Request origin is not allowed.", 403);
-  const ip = request.headers.get("x-nf-client-connection-ip") ?? "unknown";
+  const ip = clientIp(request);
   if (!(await checkRateLimit(`forgot:${ip}`, 5, 3600))) return jsonError("RATE_LIMITED", "Too many reset requests.", 429);
   const parsed = input.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return jsonError("INVALID_INPUT", "Enter a valid email address.");

@@ -1,3 +1,5 @@
+> Historical report: hosting details and prior test results describe an earlier revision. Current deployment instructions are in docs/deployment-vercel.md.
+
 # Implementation Report
 
 ## 1. System Architecture

@@ -90,7 +90,7 @@ function renderAutomatic() {
   byId<HTMLButtonElement>("autoStart").textContent = t(autoClickPost ? "Start automatic posting" : "Start preparing posts");
   byId<HTMLInputElement>("autoClickPost").checked = autoClickPost;
   byId<HTMLInputElement>("autoClickPost").disabled = sending || Boolean(currentAutomatic?.enabled) || Boolean(currentJob?.publishAttempted);
-  byId<HTMLElement>("autoHelp").textContent = t(autoClickPost ? "On: waits 5 seconds, clicks Post without checks, then waits 5 seconds before the next group." : "Off: review each prepared post and click Post on Facebook.");
+  byId<HTMLElement>("autoHelp").textContent = t(autoClickPost ? "On: clicks Post after verified preparation and waits for publication confirmation." : "Off: review each prepared post and click Post on Facebook.");
   const run = currentAutomatic;
   const running = Boolean(run?.enabled);
   const paused = Boolean(run && !run.enabled && run.phase === "PAUSED");
@@ -215,7 +215,18 @@ void chrome.storage.local.get(["apiUrl", "deviceToken", "job", "locale", "automa
   if (saved.deviceToken) void refreshCampaigns();
 });
 
-byId<HTMLButtonElement>("pair").onclick = () => void send({ type: "PAIR", apiUrl: apiUrl.value, code: code.value });
+byId<HTMLButtonElement>("pair").onclick = () => {
+  void (async () => {
+    try {
+      const url = new URL(apiUrl.value);
+      if (url.protocol !== "https:" && url.origin !== "http://localhost:3000") throw new Error("Use HTTPS for the application URL.");
+      // Request only the selected app origin during this user gesture.
+      const granted = await chrome.permissions.request({ origins: [url.origin + "/*"] });
+      if (!granted) throw new Error("Allow access to the application domain to pair this extension.");
+      await send({ type: "PAIR", apiUrl: url.origin, code: code.value });
+    } catch (error) { setStatus(error instanceof Error ? error.message : "Pairing failed."); }
+  })();
+};
 byId<HTMLButtonElement>("next").onclick = () => void send({ type: "NEXT" });
 byId<HTMLButtonElement>("disconnect").onclick = () => void send({ type: "DISCONNECT" }).then(() => { showJob(undefined, false); setStatus("Device disconnected from this browser."); });
 byId<HTMLSelectElement>("language").onchange = async (event) => {

@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import dotenv from "dotenv";
 
 dotenv.config({ path: ".env.local", quiet: true });
-if (!process.env.DATABASE_URL && !process.env.NETLIFY_DB_URL) throw new Error("Configure .env.local before running live acceptance tests.");
+if (!process.env.DATABASE_URL) throw new Error("Configure .env.local before running live acceptance tests.");
 const npmCli = process.env.npm_execpath;
 if (!npmCli) throw new Error("Run this script with npm run test:acceptance.");
 const build = spawnSync(process.execPath, [npmCli, "run", "extension:build"], { stdio: "inherit" });

@@ -3,7 +3,7 @@
 ## Setup
 
 1. Build from this branch with `npm run extension:build` and load `extension/dist` at `chrome://extensions` (Developer mode).
-2. Pair the extension with Groupflow using a one-time device code from web Settings.
+2. Enter the exact Vercel or custom HTTPS application URL, approve access to that origin, and pair using a one-time device code from web Settings. Re-pair when the domain changes.
 3. Sign in to Facebook **directly in Chrome**. Groupflow never needs your Facebook password, cookies or 2FA codes.
 4. Select a campaign and choose **Automatically click Post** (default off). Press **Start preparing posts** when off or **Start automatic posting** when on. There is no fixed three-group cap; posting intervals still apply.
 

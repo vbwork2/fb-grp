@@ -5,7 +5,7 @@ import { contents, media } from "@/lib/db/schema";
 import { getIdentity } from "@/lib/auth/session";
 import { checkRateLimit } from "@/lib/security/rate-limit";
 import { jsonError, jsonSuccess, verifySameOrigin } from "@/lib/security/http";
-import { putMedia } from "@/lib/storage";
+import { deleteMedia, putMedia } from "@/lib/storage";
 import { config } from "@/lib/config";
 import { validateImageUpload } from "@/lib/validators/media";
 
@@ -14,6 +14,8 @@ export async function POST(request: Request) {
   const identity = await getIdentity();
   if (!identity) return jsonError("UNAUTHORIZED", "Sign in to continue.", 401);
   if (!(await checkRateLimit(`media:${identity.userId}`, 30, 3600))) return jsonError("RATE_LIMITED", "Too many uploads. Try later.", 429);
+  const length = Number(request.headers.get("content-length"));
+  if (process.env.NODE_ENV === "production" && length > 4.5 * 1024 * 1024) return jsonError("INVALID_FILE", "Upload request exceeds the platform limit.", 413);
   const form = await request.formData().catch(() => null);
   const file = form?.get("file");
   const contentId = form?.get("contentId");
@@ -26,7 +28,15 @@ export async function POST(request: Request) {
     if (!owned) return jsonError("RESOURCE_NOT_FOUND", "Content not found.", 404);
   }
   const key = randomUUID();
-  await putMedia(key, bytes, { mimeType });
-  const [created] = await db.insert(media).values({ workspaceId: identity.workspaceId, contentId: typeof contentId === "string" ? contentId || null : null, storageKey: key, mimeType, originalFilename: file.name.replace(/[\\/\0]/g, "").slice(0, 255), sizeBytes: file.size }).returning();
-  return jsonSuccess(created, 201);
+  try { await putMedia(key, bytes, { mimeType }); } catch {
+    return jsonError("STORAGE_UNAVAILABLE", "Unable to store image. Try again.", 503);
+  }
+  try {
+    const [created] = await db.insert(media).values({ workspaceId: identity.workspaceId, contentId: typeof contentId === "string" ? contentId || null : null, storageKey: key, mimeType, originalFilename: file.name.replace(/[\\/\0]/g, "").slice(0, 255), sizeBytes: file.size }).returning();
+    return jsonSuccess(created, 201);
+  } catch {
+    // Remove only the newly uploaded object when metadata could not be saved.
+    await deleteMedia(key).catch(() => undefined);
+    return jsonError("UPLOAD_FAILED", "Unable to save image. Try again.", 503);
+  }
 }

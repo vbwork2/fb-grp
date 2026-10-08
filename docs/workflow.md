@@ -3,7 +3,7 @@
 ```mermaid
 sequenceDiagram
 participant U as User
-participant W as Netlify Web App
+participant W as Vercel Web App
 participant DB as PostgreSQL
 participant E as Chrome Extension
 participant F as Facebook

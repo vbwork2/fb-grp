@@ -1,3 +1,5 @@
+> Historical report: hosting details and prior test results describe an earlier revision. Current deployment instructions are in docs/deployment-vercel.md.
+
 # Báo cáo sửa assisted workflow — 08/10/2026
 
 ## 1. Baseline

@@ -2,9 +2,9 @@ import { createServer } from "node:http";
 import { resolve } from "node:path";
 import { test, expect, chromium, type Route } from "@playwright/test";
 
-for (const scenario of [{ legacyPreference: false, autoEnabled: false }, { legacyPreference: true, autoEnabled: false }, { legacyPreference: false, autoEnabled: true }]) {
-const { legacyPreference, autoEnabled } = scenario;
-test(`assisted campaign with legacy preference ${legacyPreference} and explicit Post switch ${autoEnabled} proceeds while Facebook resources keep loading`, async () => {
+for (const scenario of [{ legacyPreference: false, autoEnabled: false, publicationConfirmed: true }, { legacyPreference: true, autoEnabled: false, publicationConfirmed: true }, { legacyPreference: false, autoEnabled: true, publicationConfirmed: true }, { legacyPreference: false, autoEnabled: true, publicationConfirmed: false }]) {
+const { legacyPreference, autoEnabled, publicationConfirmed } = scenario;
+test(`assisted campaign with legacy preference ${legacyPreference} and explicit Post switch ${autoEnabled} and confirmation ${publicationConfirmed} proceeds while Facebook resources keep loading`, async () => {
   test.setTimeout(90_000);
   const campaignId = "11111111-1111-4111-8111-111111111111";
   const caption = "First line\n\nSecond section\nLast line";
@@ -94,7 +94,7 @@ test(`assisted campaign with legacy preference ${legacyPreference} and explicit 
             post.onclick = () => {
               const notice = document.createElement('div');
               notice.setAttribute('role', 'status');
-              notice.textContent = '${autoEnabled ? 'No publication confirmation in this fixture.' : 'Your post was published.'}';
+              notice.textContent = '${publicationConfirmed ? 'Your post was published.' : 'No publication confirmation in this fixture.'}';
               document.body.append(notice);
             };
           };
@@ -148,6 +148,13 @@ test(`assisted campaign with legacy preference ${legacyPreference} and explicit 
       return runtime.runtime.sendMessage({ type: "AUTO_START", campaignId: id });
     }, campaignId);
     expect(start, JSON.stringify(start)).toMatchObject({ ok: true });
+    if (!publicationConfirmed) {
+      await expect.poll(async () => (await state())?.phase, { timeout: 65_000 }).toBe("PAUSED");
+      expect(confirmed).toHaveLength(0);
+      expect(reservations).toHaveLength(1);
+      expect(claimed).toBe(1);
+      return;
+    }
     for (let number = 1; !autoEnabled && number <= groupCount; number++) {
       await expect.poll(async () => {
         const current = await state();
@@ -169,7 +176,7 @@ test(`assisted campaign with legacy preference ${legacyPreference} and explicit 
     await expect.poll(async () => { const current = await state(); if (current?.error) throw new Error(current.error); return current?.enabled; }, { timeout: 65_000 }).toBe(false);
     expect(reservations).toHaveLength(groupCount);
     expect(confirmed).toEqual(Array.from({ length: groupCount }, (_, index) => `/api/extension/jobs/job-${index + 1}/posted`));
-    await popup.screenshot({ path: `docs/repair-evidence/post-mode-${autoEnabled ? "on" : "off"}-${legacyPreference}.png` });
+    await popup.screenshot({ path: `test-results/post-mode-${autoEnabled ? "on" : "off"}-${legacyPreference}.png` });
     await groupPage.screenshot({ path: `test-results/assisted-composer-${legacyPreference}.png` });
     // A popup already open during failure must refresh the server's failed
     // count so the user can recover without closing and reopening it.

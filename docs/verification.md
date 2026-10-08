@@ -1,3 +1,5 @@
+> Historical report: hosting details and prior test results describe an earlier revision. Current deployment instructions are in docs/deployment-vercel.md.
+
 # Verification report
 
 Date: 2026-10-08. Runtime: Windows 11, Node.js 24, local Next.js server connected to Neon PostgreSQL.

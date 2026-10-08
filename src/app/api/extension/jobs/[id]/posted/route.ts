@@ -8,7 +8,7 @@ import { assertQueueTransition } from "@/lib/services/queue-state-machine";
 import { jsonError, jsonSuccess } from "@/lib/security/http";
 import { isFacebookPostUrl } from "@/lib/validators/urls";
 
-const input = z.object({ claimToken: z.string().uuid(), facebookPostUrl: z.string().url().refine(isFacebookPostUrl).optional(), notes: z.string().max(2000).optional(), confirmationSource: z.enum(["user_confirmed", "ui_confirmed", "automatic_unverified"]).default("user_confirmed") });
+const input = z.object({ claimToken: z.string().uuid(), facebookPostUrl: z.string().url().refine(isFacebookPostUrl).optional(), notes: z.string().max(2000).optional(), confirmationSource: z.enum(["user_confirmed", "ui_confirmed"]).default("user_confirmed") });
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const device = await getDevice(request);
@@ -19,19 +19,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const result = await db.transaction(async (tx) => {
     const [job] = await tx.select().from(queueItems).where(and(eq(queueItems.id, id), eq(queueItems.workspaceId, device.workspaceId), eq(queueItems.claimToken, parsed.data.claimToken))).limit(1).for("update");
     if (!job || !["OPENED", "AWAITING_CONFIRMATION"].includes(job.status)) return null;
-    const unverified = parsed.data.confirmationSource === "automatic_unverified";
-    if (unverified) {
-      if (job.status !== "AWAITING_CONFIRMATION") return null;
-      const [click] = await tx.select({ metadata: auditLogs.metadataJson }).from(auditLogs).where(and(eq(auditLogs.workspaceId, device.workspaceId), eq(auditLogs.resourceId, job.id), eq(auditLogs.action, "QUEUE_ITEM_USER_CLICKED"))).limit(1);
-      if (!click || (click.metadata as { clickSource?: string } | null)?.clickSource !== "automatic") return null;
-    }
     if (job.status === "OPENED") assertQueueTransition(job.status, "AWAITING_CONFIRMATION");
     assertQueueTransition("AWAITING_CONFIRMATION", "POSTED");
     const now = new Date();
-    await tx.update(queueItems).set({ status: "POSTED", errorCode: unverified ? "POST_OUTCOME_UNVERIFIED" : null, completedAt: now, updatedAt: now, claimToken: null, claimedAt: null }).where(eq(queueItems.id, job.id));
-    await tx.insert(postHistory).values({ workspaceId: job.workspaceId, campaignId: job.campaignId, groupId: job.groupId, queueItemId: job.id, status: "POSTED", facebookPostUrl: parsed.data.facebookPostUrl, notes: unverified ? "Automatic submission (unverified). Post was clicked; Facebook publication was not checked." : parsed.data.notes, postedAt: unverified ? null : now });
+    await tx.update(queueItems).set({ status: "POSTED", errorCode: null, completedAt: now, updatedAt: now, claimToken: null, claimedAt: null }).where(eq(queueItems.id, job.id));
+    await tx.insert(postHistory).values({ workspaceId: job.workspaceId, campaignId: job.campaignId, groupId: job.groupId, queueItemId: job.id, status: "POSTED", facebookPostUrl: parsed.data.facebookPostUrl, notes: parsed.data.notes, postedAt: now });
     await tx.update(groups).set({ lastPostedAt: now, updatedAt: now }).where(and(eq(groups.id, job.groupId), eq(groups.workspaceId, device.workspaceId)));
-    await tx.insert(auditLogs).values({ userId: device.userId, workspaceId: device.workspaceId, action: unverified ? "QUEUE_ITEM_SUBMITTED_UNVERIFIED" : "QUEUE_ITEM_POSTED", resourceType: "queue_item", resourceId: job.id, metadataJson: { confirmationSource: parsed.data.confirmationSource } });
+    await tx.insert(auditLogs).values({ userId: device.userId, workspaceId: device.workspaceId, action: "QUEUE_ITEM_POSTED", resourceType: "queue_item", resourceId: job.id, metadataJson: { confirmationSource: parsed.data.confirmationSource } });
     await completeCampaignIfFinished(tx, job.campaignId, device.workspaceId, now);
     return { status: "POSTED" };
   });

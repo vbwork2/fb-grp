@@ -3,11 +3,45 @@
   "name": "Groupflow Posting Assistant",
   "version": "0.1.3",
   "description": "Prepare Facebook Group posts with images; you review and click Post to continue each group.",
-  "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' data: blob:;" },
-  "permissions": ["storage", "tabs", "clipboardWrite", "alarms"],
-  "host_permissions": ["https://*.netlify.app/*", "https://www.facebook.com/*", "https://m.facebook.com/*", "http://localhost:3000/*"],
-  "background": { "service_worker": "background.js", "type": "module" },
-  "action": { "default_popup": "src/popup/index.html", "default_title": "Groupflow" },
-  "content_scripts": [{ "matches": ["https://www.facebook.com/groups/*", "https://m.facebook.com/groups/*", "https://www.facebook.com/login/*", "https://www.facebook.com/checkpoint/*", "https://m.facebook.com/login/*", "https://m.facebook.com/checkpoint/*"], "js": ["content.js"], "run_at": "document_idle" }]
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' data: blob:;"
+  },
+  "permissions": [
+    "storage",
+    "tabs",
+    "clipboardWrite",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://www.facebook.com/*",
+    "https://m.facebook.com/*",
+    "http://localhost:3000/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "src/popup/index.html",
+    "default_title": "Groupflow"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.facebook.com/groups/*",
+        "https://m.facebook.com/groups/*",
+        "https://www.facebook.com/login/*",
+        "https://www.facebook.com/checkpoint/*",
+        "https://m.facebook.com/login/*",
+        "https://m.facebook.com/checkpoint/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ]
 }
-

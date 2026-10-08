@@ -1,8 +1,8 @@
 export const vietnamese: Record<string, string> = {
-  "On: waits 5 seconds, clicks Post without checks, then waits 5 seconds before the next group.": "Bật: chờ 5 giây, bấm Đăng không xác minh, chờ thêm 5 giây rồi chuyển nhóm.",
-  "Post clicked. Waiting 5 seconds before the next group; publication is not checked.": "Đã bấm Đăng. Chờ 5 giây rồi chuyển nhóm; không kiểm tra Facebook xác nhận.",
+  "On: clicks Post after verified preparation and waits for publication confirmation.": "Bật: bấm Đăng sau khi kiểm tra nội dung và chờ xác nhận bài đã đăng.",
+  "Post clicked. Waiting for Facebook publication confirmation.": "Đã bấm Đăng. Đang chờ Facebook xác nhận bài đã đăng.",
   "Post submitted without verification. Preparing the next scheduled group.": "Đã gửi thao tác Đăng, chưa xác minh kết quả. Đang chuẩn bị nhóm tiếp theo theo lịch.",
-  "Automatically clicking Post. Publication will not be checked.": "Đang tự bấm Đăng. Không kiểm tra kết quả xuất bản.",
+  "Automatically clicking Post. Waiting for Facebook confirmation.": "Đang tự bấm Đăng. Chờ Facebook xác nhận.",
   "Waiting 5 seconds before the next group": "Chờ 5 giây rồi chuyển nhóm",
   "Submitted (unverified)": "Đã gửi, chưa xác minh",
   "Review the caption and attached images on Facebook, then click Post yourself. Image preview verification is unavailable.": "Kiểm tra caption và các ảnh trên Facebook rồi tự bấm Đăng. Chế độ thủ công không yêu cầu extension xác minh preview ảnh.",

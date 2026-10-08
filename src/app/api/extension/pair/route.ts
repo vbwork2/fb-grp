@@ -1,3 +1,4 @@
+import { clientIp } from "@/lib/security/client-ip";
 import { createHash } from "node:crypto";
 import { and, eq, gt, isNull } from "drizzle-orm";
 import { z } from "zod";
@@ -11,7 +12,7 @@ import { createOpaqueToken, hashOpaqueToken } from "@/lib/security/tokens";
 const input = z.object({ code: z.string().regex(/^\d{3}-\d{3}$/), name: z.string().trim().min(1).max(120).default("Chrome Extension") });
 
 export async function POST(request: Request) {
-  const ip = request.headers.get("x-nf-client-connection-ip") ?? "unknown";
+  const ip = clientIp(request);
   if (!(await checkRateLimit(`pair:${ip}`, 8, 900))) return jsonError("RATE_LIMITED", "Too many pairing attempts.", 429);
   const parsed = input.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return jsonError("INVALID_INPUT", "Enter a valid pairing code.");

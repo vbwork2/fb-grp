@@ -1,3 +1,4 @@
+import { clientIp } from "@/lib/security/client-ip";
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -16,7 +17,7 @@ export async function POST(request: Request) {
   if (!parsed.success) return jsonError("INVALID_CREDENTIALS", "Email or password is incorrect.", 401);
   const email = parsed.data.email.toLowerCase();
   try {
-    if (!(await checkRateLimit(`login:${email}:${request.headers.get("x-nf-client-connection-ip") ?? "unknown"}`, 10, 900))) return jsonError("RATE_LIMITED", "Too many sign-in attempts.", 429);
+    if (!(await checkRateLimit(`login:${email}:${clientIp(request)}`, 10, 900))) return jsonError("RATE_LIMITED", "Too many sign-in attempts.", 429);
   } catch {
     return jsonError("RATE_LIMIT_UNAVAILABLE", "Unable to check sign-in limits. Check the database connection and retry.", 503);
   }

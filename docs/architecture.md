@@ -1,13 +1,13 @@
 # Architecture
 
-The application is a single Next.js App Router project. Netlify's current OpenNext adapter runs pages, route handlers, and server rendering from one site deployment. PostgreSQL stores relational data through Drizzle. Netlify Blobs stores production uploads; a workspace-local file adapter is used only in development.
+The application is a single Next.js App Router project. Vercel runs pages, route handlers, and server rendering from one project rooted at `.`. PostgreSQL stores relational data through Drizzle. Private Vercel Blob stores production uploads; a workspace-local file adapter is used only in development.
 
 ```mermaid
 flowchart TD
 U[User]
-W[Next.js on Netlify]
-DB[(PostgreSQL)]
-B[Netlify Blobs]
+W[Next.js on Vercel]
+DB[(Neon PostgreSQL)]
+B[Private Vercel Blob]
 E[Chrome Extension]
 FB[Facebook.com]
 U --> W
