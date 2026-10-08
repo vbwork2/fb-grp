@@ -303,7 +303,7 @@ test("multiline Vietnamese caption keeps every line and blank section separator"
   expect(prepared).toMatchObject({ ok: true, clicked: false });
   const editor = page.locator("[role='dialog'] [role='textbox']");
   await expect(editor).toHaveText(caption, { useInnerText: true });
-  expect(await editor.locator("br").count()).toBeGreaterThan(0);
+  expect(await editor.evaluate((element) => ((element as HTMLElement).innerText.match(/\n/g) ?? []).length)).toBeGreaterThan(6);
   const result = await send(page, { type: "PUBLISH_POST", ...job, caption, linkUrl: null });
   expect(result).toMatchObject({ ok: true, clicked: true });
   expect(await page.evaluate(() => (window as unknown as { finalPostClicks: number }).finalPostClicks)).toBe(1);
