@@ -20,47 +20,72 @@ function groupPath(value: string): string | undefined {
   } catch { return; }
 }
 
-const EDITOR_SELECTOR = "div[contenteditable='true'][role='textbox'], div[contenteditable='true'][data-lexical-editor='true'], textarea[name='xhpc_message']";
+const EDITOR_SELECTOR = "div[contenteditable='true'][role='textbox'], div[contenteditable='true'][data-lexical-editor='true'], textarea[name='xhpc_message'], [role='dialog'] [contenteditable='true'][aria-label]";
 const COMPOSER_TIMEOUT_MS = 10_000;
 
 function editorCandidates(root: ParentNode = document): HTMLElement[] {
-  return [...root.querySelectorAll<HTMLElement>(EDITOR_SELECTOR)].filter(visible);
+  const candidates = [...root.querySelectorAll<HTMLElement>(EDITOR_SELECTOR)].filter(visible);
+  return candidates.filter((editor) => !candidates.some((other) => other !== editor && other.contains(editor)));
 }
 
-// Facebook can have unrelated comment editors on the group page. Never fill one
-// of those: the compose editor must be inside a visible dialog or form.
+// Only fill the post composer: never mistake the comment field in the feed
+// for the main post. The actual Facebook post form is a visible dialog.
 function openComposerEditor(): HTMLElement | undefined {
   const dialogs = [...document.querySelectorAll<HTMLElement>("[role='dialog']")].filter(visible);
-  const dialogEditors = dialogs.flatMap((dialog) => editorCandidates(dialog));
-  if (dialogEditors.length === 1) return dialogEditors[0];
-  if (dialogEditors.length > 1) return;
+  const candidates = dialogs.flatMap((dialog) => editorCandidates(dialog));
+  if (candidates.length === 1) return candidates[0];
+  if (candidates.length > 1) return undefined;
   const formEditors = editorCandidates().filter((editor) => Boolean(editor.closest("form")));
   return formEditors.length === 1 ? formEditors[0] : undefined;
 }
 
-function composeTriggers(): HTMLElement[] {
-  // Exact English labels are not sufficient: Facebook localizes and personalizes
-  // them (for example "Bạn viết gì đi, ...?" or "What's on your mind, ...?").
-  const caption = /^(?:write something|what['’]?s on your mind|create (?:a )?post|start (?:a )?discussion|viết gì|viết bài|bạn viết gì|bạn đang nghĩ gì|tạo bài viết|bắt đầu thảo luận|chia sẻ điều gì)(?:$|[\s.,!?…])/i;
-  return [...document.querySelectorAll<HTMLElement>("button, [role='button']")].filter((element) => {
-    if (!visible(element)) return false;
-    const label = (element.getAttribute("aria-label") || element.innerText || "").replace(/\s+/g, " ").trim();
-    return caption.test(label);
-  });
+const INLINE_COMPOSER_TEXT = /^(?:bạn viết gì đi|viết gì đó|write something|what['’]s on your mind|bạn đang nghĩ gì)(?:$|[\s.,!?…])/i;
+const CREATE_POST_TEXT = /^(?:tạo bài viết|viết bài|create (?:a )?post|start (?:a )?discussion|bắt đầu thảo luận|chia sẻ điều gì)(?:$|[\s.,!?…])/i;
+
+function labelOf(element: HTMLElement): string {
+  return (element.getAttribute("aria-label") || element.innerText || element.textContent || "").replace(/\s+/g, " ").trim();
+}
+
+// Screenshot-based behavior: the center "Bạn viết gì đi..." trigger wins
+// over the right-side "Tạo bài viết" action. More than one equally good
+// match is an error, not permission to guess and click an unrelated control.
+function composeTriggers(): { primary: HTMLElement[]; fallback: HTMLElement[] } {
+  const primary = new Set<HTMLElement>();
+  const fallback = new Set<HTMLElement>();
+  const controls = [...document.querySelectorAll<HTMLElement>("button, [role='button']")];
+  for (const element of controls) {
+    if (!visible(element) || element.closest("[role='dialog']")) continue;
+    const label = labelOf(element);
+    if (INLINE_COMPOSER_TEXT.test(label)) primary.add(element);
+    else if (CREATE_POST_TEXT.test(label)) fallback.add(element);
+  }
+  // Some Facebook variants expose the text on a child span while the
+  // click handler is attached to a non-semantic div. The span receives
+  // the click and bubbles it to that div, but only for a unique label.
+  if (!primary.size) {
+    const leaves = [...document.querySelectorAll<HTMLElement>("span, p")].filter((element) =>
+      visible(element) && element.children.length === 0 && !element.closest("[role='dialog']")
+      && INLINE_COMPOSER_TEXT.test(labelOf(element))
+    );
+    for (const leaf of leaves) {
+      const clickable = leaf.closest<HTMLElement>("button, [role='button'], [tabindex='0']");
+      primary.add(clickable && visible(clickable) ? clickable : leaf);
+    }
+  }
+  return { primary: [...primary], fallback: [...fallback] };
 }
 
 async function composer(): Promise<HTMLElement | undefined> {
   const existing = openComposerEditor();
   if (existing) return existing;
-  const triggers = composeTriggers();
-  // Never guess which trigger to click if the page is ambiguous.
-  if (triggers.length !== 1) return;
-  triggers[0].click();
-  // Polling a small set of dialogs avoids a full-page MutationObserver reacting
-  // to Facebook's frequent feed updates and potentially stalling the tab.
+  const { primary, fallback } = composeTriggers();
+  const chosen = primary.length ? primary : fallback;
+  if (chosen.length !== 1) return undefined;
+  chosen[0].click();
+  // Poll only for the composer, rather than observe thousands of unrelated
+  // mutations in the Facebook feed.
   return waitFor(openComposerEditor, COMPOSER_TIMEOUT_MS);
 }
-
 function fill(editor: HTMLElement, message: ComposerMessage) {
   const text = [message.caption ?? "", message.linkUrl ?? ""].filter(Boolean).join("\n\n");
   editor.focus();
