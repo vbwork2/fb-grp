@@ -162,11 +162,11 @@ async function fill(editor: HTMLElement, message: ComposerMessage): Promise<bool
       if (lines[i] && !document.execCommand("insertText", false, lines[i])) return false;
     }
   }
-  // Give controlled React/Lexical editors a moment to reconcile DOM changes.
-  await new Promise((resolve) => window.setTimeout(resolve, 120));
-  const valid = captionMatches(editor, text);
+  // Facebook can reconcile its Lexical state asynchronously. Wait for a
+  // stable-looking result instead of declaring failure after a fixed 120 ms.
+  const valid = await waitFor(() => captionMatches(editor, text) ? true : undefined, 1800);
   if (valid && message.jobId) preparedJob = { id: message.jobId, editor };
-  return valid;
+  return Boolean(valid);
 }
 
 function lostCaptionLineBreaks(editor: HTMLElement, message: ComposerMessage): boolean {
