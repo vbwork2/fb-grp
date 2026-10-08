@@ -17,6 +17,7 @@ export const vietnamese: Record<string, string> = {
   "Edited captions are saved as a separate content copy with the original images. Other campaigns keep their content. Replacing content uses its primary caption.": "Caption chỉnh sửa được lưu thành nội dung riêng cùng ảnh gốc. Các chiến dịch khác giữ nguyên nội dung. Nội dung thay thế sử dụng caption chính.",
   "Group name and URL changes apply to your workspace. Removing a group here only removes it from this campaign.": "Tên và URL nhóm được cập nhật trong không gian làm việc. Bỏ nhóm ở đây chỉ bỏ khỏi chiến dịch này.",
   "Previously processed posts keep their history and are not posted again. Pending posts are rescheduled when you save.": "Các bài đã xử lý giữ nguyên lịch sử và không đăng lại. Lịch của các bài chưa đăng được cập nhật khi lưu.",
+  "Facebook could not preserve the caption formatting. Review the text and line breaks before publishing.": "Facebook không giữ được định dạng xuống dòng của bài viết. Hãy kiểm tra và sửa nội dung trước khi đăng.",
   "Images (optional)": "Ảnh (không bắt buộc)",
   "Choose JPG, PNG, or WebP images. They will be uploaded when you save content.": "Chọn ảnh JPG, PNG hoặc WebP. Ảnh sẽ được tải lên khi bạn lưu nội dung.",
   "Content and images saved.": "Đã lưu nội dung và ảnh.",
