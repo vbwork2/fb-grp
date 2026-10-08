@@ -325,25 +325,33 @@ test("authenticated workflows, tenant isolation, device claims, and password res
           return { enabled: value.enabled, error: value.error ?? "", popup: await popup.locator("#status").innerText() };
         }, { timeout: 10_000 }).toEqual({ enabled: true, error: "", popup: "" });
         await expect.poll(async () => {
-          const state = (await worker.evaluate(() => chrome.storage.local.get("automatic"))).automatic as { error?: string };
-          if (state?.error) throw new Error(`Automatic runner stopped: ${state.error}. Fixture: ${await groupPage.locator("body").innerHTML()}`);
-          return Number((await sql`select count(*) as total from queue_items where campaign_id=${automatic.id} and status='POSTED'`)[0].total);
-        }, { timeout: 90_000 }).toBe(1);
+          const state = (await worker.evaluate(() => chrome.storage.local.get("automatic"))).automatic as { error?: string; phase?: string };
+          if (state?.error) throw new Error(`Campaign paused: ${state.error}. Fixture: ${await groupPage.locator("body").innerHTML()}`);
+          return state?.phase;
+        }, { timeout: 90_000 }).toBe("AWAITING_USER");
         await expect(groupPage.getByRole("textbox")).toContainText("Updated caption for manual review");
         expect(await groupPage.locator('input[type="file"]').evaluate((input: HTMLInputElement) => input.files?.[0].name)).toBe("pixel.png");
+        expect(Number((await sql`select count(*) as total from queue_items where campaign_id=${automatic.id} and status='POSTED'`)[0].total)).toBe(0);
+        // Only the user, not the extension, may click the Facebook Post button.
+        await groupPage.locator("#post").click();
+        await expect.poll(async () => Number((await sql`select count(*) as total from queue_items where campaign_id=${automatic.id} and status='POSTED'`)[0].total), { timeout: 90_000 }).toBe(1);
         await sql`update queue_items set scheduled_at=now()-interval '1 minute' where campaign_id=${automatic.id} and status='PENDING'`;
         await worker.evaluate(() => chrome.alarms.create("groupflow-automatic", { when: Date.now() + 1000 }));
+        await expect.poll(async () =>
+          ((await worker.evaluate(() => chrome.storage.local.get("automatic"))).automatic as { phase?: string })?.phase,
+          { timeout: 90_000 }).toBe("AWAITING_USER");
+        await groupPage.locator("#post").click();
         await expect.poll(async () => Number((await sql`select count(*) as total from queue_items where campaign_id=${automatic.id} and status='POSTED'`)[0].total), { timeout: 90_000 }).toBe(2);
         await worker.evaluate(() => chrome.alarms.create("groupflow-automatic", { when: Date.now() + 1000 }));
         await expect.poll(async () => Boolean((await worker.evaluate(() => chrome.storage.local.get("automatic"))).automatic && ((await worker.evaluate(() => chrome.storage.local.get("automatic"))).automatic as { enabled: boolean }).enabled), { timeout: 90_000 }).toBe(false);
         expect((await sql`select status from campaigns where id=${automatic.id}`)[0].status).toBe("COMPLETED");
-        expect(await sql`select id from post_history where campaign_id=${automatic.id} and notes like 'Automatic run:%'`).toHaveLength(2);
+        expect(await sql`select id from post_history where campaign_id=${automatic.id} and notes like 'Facebook displayed%'`).toHaveLength(2);
         const extraGroup = await data(await actorA.post("/api/groups", { data: { name: "Limit acceptance group", facebookUrl: `https://www.facebook.com/groups/test-${runId}-limit/` } }), 201);
         const oversized = await data(await actorA.post("/api/campaigns", { data: { name: "Oversized automatic acceptance", contentId, groupIds: [...groupIds, extraGroup.id], minIntervalSeconds: 60, maxIntervalSeconds: 60 } }), 201);
         const token = (await worker.evaluate(() => chrome.storage.local.get("deviceToken"))).deviceToken as string;
-        expect((await guest.post("/api/extension/campaigns", { headers: bearer(token), data: { campaignId: oversized.id } })).status()).toBe(409);
+        expect((await guest.post("/api/extension/campaigns", { headers: bearer(token), data: { campaignId: oversized.id } })).status()).toBe(200);
         const eligible = await data(await guest.get("/api/extension/campaigns", { headers: bearer(token) }));
-        expect(eligible.items.some((entry: { id: string }) => entry.id === oversized.id)).toBe(false);
+        expect(eligible.items.some((entry: { id: string }) => entry.id === oversized.id)).toBe(true);
         const [device] = await sql`select id from devices where user_id=${userId} and name='Chrome Extension' and revoked_at is null`;
         await data(await actorA.delete("/api/devices", { data: { id: device.id } }));
         await popup.locator("#next").click();
