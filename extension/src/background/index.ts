@@ -149,7 +149,7 @@ chrome.runtime.onMessage.addListener((message: { type: string; apiUrl?: string; 
 
 type AutomaticRun = {
   runId: string; campaignId: string; enabled: boolean; attempts: number;
-  tabId?: number; groupName?: string; status: string; error?: string;
+  tabId?: number; groupName?: string; jobId?: string; status: string; error?: string;
   phase: "WAITING" | "OPENING" | "PREPARING" | "AWAITING_USER" | "VERIFYING" | "PAUSED";
 };
 const automaticAlarm = "groupflow-automatic";
@@ -316,13 +316,13 @@ async function runAutomatic() {
     let tab: chrome.tabs.Tab | undefined;
     if (run.tabId) {
       const existing = await chrome.tabs.get(run.tabId).catch(() => undefined);
-      tab = existing && sameGroup(existing.url, job.group.url)
+      tab = existing && run.jobId === job.id && sameGroup(existing.url, job.group.url)
         ? await chrome.tabs.update(run.tabId, { active: true })
         : await chrome.tabs.update(run.tabId, { url: job.group.url, active: true })
             .catch(() => chrome.tabs.create({ url: job.group.url, active: true }));
     } else tab = await chrome.tabs.create({ url: job.group.url, active: true });
     if (!tab?.id) throw new Error("The Facebook Group could not be opened.");
-    await updateAutomatic(run, { tabId: tab.id });
+    await updateAutomatic(run, { tabId: tab.id, jobId: job.id });
     const ready = await loadedTab(tab.id, run);
     if (!sameGroup(ready.url, job.group.url))
       throw new Error("Sign in or complete verification directly on Facebook, then resume.");
