@@ -227,6 +227,9 @@ async function resetFailed() {
 async function recordVerifiedPost(run: AutomaticRun, job: Job, note: string) {
   await api("/api/extension/jobs/" + job.id + "/posted", { claimToken: job.claimToken, notes: note });
   await chrome.storage.local.remove("job");
+  if (run.tabId) {
+    await chrome.tabs.sendMessage(run.tabId, { type: "CANCEL_JOB", jobId: job.id }).catch(() => undefined);
+  }
   // Do not reopen a new group if this run was stopped or cancelled while the
   // server call was in flight.
   const current = await automaticState();
