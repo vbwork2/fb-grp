@@ -37,7 +37,7 @@ For Netlify Database instead, initialize it on the site, set `DATABASE_PROVIDER=
 - Verify the group opens, caption copy works, optional preparation works where supported, and posted/skipped/failed outcomes update the app.
 - Revoke the device and verify it cannot fetch another job.
 
-The user can publish manually or explicitly start automatic posting for at most three selected groups. Reload the extension after updating its alarms permission. Facebook's current composer, image upload and confirmation notices need a controlled manual check on the deployed app; actual email delivery also requires this check.
+The user can publish manually or start assisted posting for campaigns without a fixed group-count cap; the user must click Post for each group, and the extension advances only after confirmation. Reload the extension after updating its code. Facebook's current composer, image upload and confirmation notices need a controlled manual check on the deployed app; actual email delivery also requires this check.
 
 References: [Netlify Next.js support](https://docs.netlify.com/build/frameworks/framework-setup-guides/nextjs/overview/), [function payload limits](https://docs.netlify.com/build/functions/configuration/), [Netlify Blobs](https://docs.netlify.com/build/data-and-storage/netlify-blobs/).
 
