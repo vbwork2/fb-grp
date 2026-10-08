@@ -1,4 +1,4 @@
-type Job = { id: string; claimToken: string; publishAttempted?: boolean; userClicked?: boolean; campaignId?: string; campaign: string; group: { id: string; name: string; url: string }; content: { name: string; caption: string; linkUrl: string | null; media: { id: string; mimeType: string; filename: string }[] } };
+type Job = { id: string; claimToken: string; publishAttempted?: boolean; userClicked?: boolean; autoContinueAt?: number; campaignId?: string; campaign: string; group: { id: string; name: string; url: string }; content: { name: string; caption: string; linkUrl: string | null; media: { id: string; mimeType: string; filename: string }[] } };
 
 async function settings() {
   return chrome.storage.local.get(["apiUrl", "deviceToken", "job"]) as Promise<{ apiUrl?: string; deviceToken?: string; job?: Job }>;
@@ -28,6 +28,7 @@ async function mediaData(id: string): Promise<string> {
   return `data:${response.headers.get("content-type") ?? "application/octet-stream"};base64,${btoa(binary)}`;
 }
 
+const uploadReserving = new Set<string>();
 const publishing = new Set<string>();
 
 function sameGroup(actual: string | undefined, expected: string): boolean {
@@ -42,6 +43,29 @@ function sameGroup(actual: string | undefined, expected: string): boolean {
 chrome.runtime.onMessage.addListener((message: { type: string; enabled?: boolean; apiUrl?: string; code?: string; mediaId?: string; jobId?: string; mediaConfirmed?: boolean; campaignId?: string; stage?: string; outcome?: "published" | "approval" | "unknown" }, sender, sendResponse) => {
   void (async () => {
     try {
+      if (message.type === "PREPARATION_POST_CLICKED") {
+        const job = (await settings()).job;
+        const run = await automaticState();
+        if (!job || job.id !== message.jobId || !sender.tab?.id || !sameGroup(sender.url, job.group.url) ||
+            (run?.enabled && run.tabId !== sender.tab.id)) throw new Error("This preparation session is no longer active.");
+        // The human click already happened. Preserve it before any network call.
+        await chrome.storage.local.set({ job: { ...job, publishAttempted: true } });
+        await api("/api/extension/jobs/" + job.id + "/submission", { claimToken: job.claimToken, action: "begin", automatic: Boolean(run?.enabled) });
+        sendResponse({ ok: true }); return;
+      }
+      if (message.type === "UPLOAD_BEGIN") {
+        if (!message.jobId || uploadReserving.has(message.jobId)) throw new Error("An upload reservation is already in progress.");
+        uploadReserving.add(message.jobId);
+        try {
+          const job = (await settings()).job;
+          const run = await automaticState();
+          if (!job || job.id !== message.jobId || sender.tab?.id !== run?.tabId || !run?.enabled || run.phase !== "PREPARING" || !sameGroup(sender.url, job.group.url)) throw new Error("Upload reservation is unavailable. Review the existing composer.");
+          const reservations = (await chrome.storage.local.get("uploadReservations")).uploadReservations as Record<string, boolean> | undefined;
+          if (reservations?.[job.id]) throw new Error("Images may already be attached. Review the existing composer; do not upload again.");
+          await chrome.storage.local.set({ uploadReservations: { ...reservations, [job.id]: true } });
+          sendResponse({ ok: true }); return;
+        } finally { uploadReserving.delete(message.jobId); }
+      }
       if (message.type === "AUTO_SET_PUBLISH") {
         const run = await automaticState();
         if ((sender.tab && !sender.url?.startsWith("chrome-extension://")) || typeof message.enabled !== "boolean") throw new Error("Change the posting mode in the extension popup.");
@@ -57,6 +81,7 @@ chrome.runtime.onMessage.addListener((message: { type: string; enabled?: boolean
           OPEN_COMPOSER: "Opening the Facebook post composer.",
           FILL_CAPTION: "Filling in the caption.",
           ATTACH_IMAGES: "Attaching images to the post.",
+          WAIT_AUTO_POST: "Waiting 5 seconds before automatically clicking Post.",
           VERIFY_UPLOAD: "Waiting for images to finish uploading.",
           PREPARED: "Caption and images are ready to publish."
         };
@@ -175,7 +200,7 @@ async function active(run: AutomaticRun): Promise<AutomaticRun> {
 async function announceAutomatic(state: AutomaticRun) {
   if (!state.tabId) return;
   await chrome.tabs.sendMessage(state.tabId, {
-    type: "AUTO_PROGRESS", phase: state.phase, status: state.status,
+    type: "AUTO_PROGRESS", phase: state.phase, status: state.status, autoClickPost: state.autoClickPost,
     error: state.error, enabled: state.enabled,
   }).catch(() => undefined);
 }
@@ -235,7 +260,7 @@ async function resetFailed() {
 }
 
 const confirmingPosts = new Set<string>();
-async function recordVerifiedPost(run: AutomaticRun, job: Job, note: string, confirmationSource: "ui_confirmed" | "user_confirmed" = "user_confirmed") {
+async function recordCompletedPost(run: AutomaticRun, job: Job, note: string, confirmationSource: "ui_confirmed" | "user_confirmed" | "automatic_unverified" = "user_confirmed") {
   if (confirmingPosts.has(job.id)) return;
   confirmingPosts.add(job.id);
   try {
@@ -249,10 +274,23 @@ async function recordVerifiedPost(run: AutomaticRun, job: Job, note: string, con
     // server call was in flight.
     const current = await automaticState();
     if (!current?.enabled || current.runId !== run.runId) return;
-    await updateAutomatic(run, { phase: "WAITING", status: "Post verified. Preparing the next scheduled group.", error: "", groupName: undefined });
+    await updateAutomatic(run, { phase: "WAITING", status: confirmationSource === "automatic_unverified" ? "Post submitted without verification. Preparing the next scheduled group." : "Post verified. Preparing the next scheduled group.", error: "", groupName: undefined });
     void runAutomatic();
   } finally { confirmingPosts.delete(job.id); }
 }
+async function completeUncheckedPost(run: AutomaticRun, job: Job) {
+  if (!job.userClicked || !job.autoContinueAt) throw new Error("The automatic Post click was not recorded. Review Facebook before continuing.");
+  await updateAutomatic(run, { phase: "VERIFYING", status: "Post clicked. Waiting 5 seconds before the next group; publication is not checked." });
+  while (Date.now() < job.autoContinueAt) {
+    await active(run);
+    await new Promise(resolve => setTimeout(resolve, Math.min(250, job.autoContinueAt! - Date.now())));
+  }
+  await active(run);
+  const current = (await settings()).job;
+  if (current?.id !== job.id || !current.userClicked) return;
+  await recordCompletedPost(run, current, "Automatic submission (unverified). Post was clicked; Facebook publication was not checked.", "automatic_unverified");
+}
+
 async function confirmPostManually() {
   const run = await automaticState();
   const job = (await settings()).job;
@@ -261,7 +299,7 @@ async function confirmPostManually() {
   if (automaticBusy && run.autoClickPost && run.phase === "VERIFYING") throw new Error("Wait for Facebook verification before confirming this post.");
   if (!["AWAITING_USER", "VERIFYING", "PAUSED"].includes(run.phase))
     throw new Error("Confirm the result on Facebook before continuing.");
-  await recordVerifiedPost(run, job, "User explicitly confirmed a Facebook publication in the extension.");
+  await recordCompletedPost(run, job, "User explicitly confirmed a Facebook publication in the extension.");
   // If the user previously stopped monitoring, the record stays complete but
   // another group will not be opened until they restart the run.
 }
@@ -273,8 +311,8 @@ async function userClickedPost(jobId: string | undefined, tabId: number | undefi
   const [run, saved] = await Promise.all([automaticState(), settings()]);
   if (!run || !matchingActivePost(jobId, tabId, run, saved.job) || !(run.phase === "AWAITING_USER" || (run.autoClickPost && run.phase === "VERIFYING" && !saved.job?.userClicked)))
     throw new Error("This posting session is no longer active.");
-  await chrome.storage.local.set({ job: { ...saved.job, userClicked: true } });
-  await updateAutomatic(run, { phase: "VERIFYING", status: clickSource === "automatic" ? "Automatically publishing. Waiting for Facebook confirmation." : "You clicked Post. Waiting for Facebook confirmation." });
+  await chrome.storage.local.set({ job: { ...saved.job, userClicked: true, ...(clickSource === "automatic" ? { autoContinueAt: Date.now() + 5000 } : {}) } });
+  await updateAutomatic(run, { phase: "VERIFYING", status: clickSource === "automatic" ? "Post clicked. Waiting 5 seconds before the next group; publication is not checked." : "You clicked Post. Waiting for Facebook confirmation." });
   try {
     await api(`/api/extension/jobs/${saved.job!.id}/submission`, { claimToken: saved.job!.claimToken, action: "clicked", clickSource });
   } catch (cause) {
@@ -288,7 +326,7 @@ async function userPostResult(jobId: string | undefined, result: string | undefi
     throw new Error("This posting session is no longer active.");
   if (result === "published") {
     try {
-      await recordVerifiedPost(run, saved.job, "Facebook displayed a publication confirmation after the user clicked Post.", "ui_confirmed");
+      await recordCompletedPost(run, saved.job, "Facebook displayed a publication confirmation after the user clicked Post.", "ui_confirmed");
     } catch (cause) {
       // Keep the reserved job for review and make recording failures visible.
       await stopAutomatic(cause instanceof Error ? cause.message : "Extension request failed.");
@@ -312,7 +350,7 @@ async function startAutomatic(campaignId?: string) {
   const run: AutomaticRun = {
     runId: crypto.randomUUID(), campaignId, enabled: true, attempts: 0,
     autoClickPost: (await chrome.storage.local.get("autoClickPost")).autoClickPost === true,
-    tabId: previous?.tabId, phase: "WAITING", status: "Automatic preparation started.",
+    tabId: previous?.tabId, jobId: saved.job?.id === previous?.jobId ? previous?.jobId : undefined, phase: "WAITING", status: "Automatic preparation started.",
   };
   await chrome.storage.local.set({ automatic: run });
   await chrome.alarms.create(automaticAlarm, { periodInMinutes: 1 });
@@ -353,6 +391,12 @@ async function runAutomatic() {
   try {
     // Never start another group while the user is reviewing or Facebook's
     // outcome is uncertain (also holds after a service-worker restart).
+    if (run.autoClickPost && run.phase === "VERIFYING") {
+      const job = (await settings()).job;
+      if (job && job.id === run.jobId && job.userClicked && job.autoContinueAt) {
+        await completeUncheckedPost(run, job); return;
+      }
+    }
     if (["AWAITING_USER", "VERIFYING"].includes(run.phase)) {
       if (run.jobId && run.tabId && watchedJobs.has(run.jobId)) {
         const job = (await settings()).job;
@@ -408,12 +452,13 @@ async function runAutomatic() {
     }
     const prepared = await chrome.tabs.sendMessage(tab.id, {
       type: "PREPARE_CAPTION", jobId: job.id, expectedGroupUrl: job.group.url,
-      caption: job.content.caption, linkUrl: job.content.linkUrl, attachments, allowUnverifiedImages: !run.autoClickPost,
-    }) as { ok?: boolean; message?: string; reason?: string; warning?: string; clicked?: boolean };
+      caption: job.content.caption, linkUrl: job.content.linkUrl, attachments, allowUnverifiedImages: !run.autoClickPost, skipContentVerification: run.autoClickPost === true,
+    }) as { ok?: boolean; message?: string; reason?: string; warning?: string; clicked?: boolean; diagnostics?: Record<string, unknown> };
+    if (prepared?.diagnostics) await chrome.storage.local.set({ uploadDiagnostics: prepared.diagnostics });
     if (!prepared?.ok && prepared?.clicked) {
       // A user click during preparation must remain reserved for manual review.
-      await api("/api/extension/jobs/" + job.id + "/submission", { claimToken: job.claimToken, action: "begin", automatic: true });
       await chrome.storage.local.set({ job: { ...job, publishAttempted: true } });
+      await api("/api/extension/jobs/" + job.id + "/submission", { claimToken: job.claimToken, action: "begin", automatic: true });
     }
     if (!prepared?.ok) throw Object.assign(new Error(prepared?.message ?? "The Facebook post could not be prepared."), { code: prepared?.reason ?? "PREPARE_FAILED" });
     await active(run);
@@ -426,18 +471,20 @@ async function runAutomatic() {
       phase: "AWAITING_USER", attempts: run.attempts + 1,
       status: prepared.warning ?? "Ready. Review the caption and images, then click Post on Facebook.",
     });
+    if (!run.autoClickPost) {
     const armed = await chrome.tabs.sendMessage(tab.id, {
       type: "ARM_USER_POST", jobId: job.id, expectedGroupUrl: job.group.url, allowUnverifiedImages: !run.autoClickPost,
     }) as { ok?: boolean; message?: string };
     if (!armed?.ok) throw new Error(armed?.message ?? "Cannot monitor the Facebook Post button. Review the post manually.");
     watchedJobs.add(job.id);
+    }
     if (run.autoClickPost) {
       await active(run);
-      await updateAutomatic(run, { phase: "VERIFYING", status: "Automatically publishing. Waiting for Facebook confirmation." });
+      await updateAutomatic(run, { phase: "VERIFYING", status: "Automatically clicking Post. Publication will not be checked." });
       const result = await chrome.tabs.sendMessage(tab.id, {
         type: "PUBLISH_POST", jobId: job.id, expectedGroupUrl: job.group.url,
         caption: job.content.caption, linkUrl: job.content.linkUrl,
-        attachments, trackOutcome: true,
+        attachments, trackOutcome: false, skipContentVerification: true,
       }) as { ok?: boolean; clicked?: boolean; outcome?: string; reason?: string; message?: string };
       await active(run);
       const latestJob = (await settings()).job;
@@ -449,15 +496,17 @@ async function runAutomatic() {
       }
       if (!result?.ok || !result.clicked) throw Object.assign(new Error(result?.message ?? "The Facebook action could not be verified. Check Facebook before continuing."), { code: result?.reason ?? "POST_OUTCOME_UNKNOWN" });
       if (!latestJob?.userClicked) await userClickedPost(job.id, tab.id, "automatic");
-      await userPostResult(job.id, result.outcome ?? "unknown", tab.id);
+      const submitted = (await settings()).job;
+      if (submitted?.id === job.id) await completeUncheckedPost(run, submitted);
     }
   } catch (cause) {
     const state = await automaticState();
     if (state?.runId === run.runId && state.enabled) {
       const job = (await settings()).job;
-      // Before arming and before server reservation, the extension is certain
-      // it has not clicked Post. Persist the failed group for safe reset.
-      if (job && job.campaignId === run.campaignId && !job.publishAttempted) {
+      // Keep a dispatched upload and its claim available for manual recovery.
+      // Fail only preparations that never reserved an image dispatch.
+      const reservations = (await chrome.storage.local.get("uploadReservations")).uploadReservations as Record<string, boolean> | undefined;
+      if (job && job.campaignId === run.campaignId && !job.publishAttempted && !reservations?.[job.id]) {
         try {
           await api("/api/extension/jobs/" + job.id + "/failed", {
             claimToken: job.claimToken, errorCode: (cause as { code?: string })?.code ?? "PREPARE_FAILED",
@@ -471,7 +520,7 @@ async function runAutomatic() {
   } finally {
     automaticBusy = false;
     const next = await automaticState();
-    if (next?.enabled && next.runId === run.runId && next.phase === "WAITING" && next.status === "Post verified. Preparing the next scheduled group.") void runAutomatic();
+    if (next?.enabled && next.runId === run.runId && next.phase === "WAITING" && ["Post verified. Preparing the next scheduled group.", "Post submitted without verification. Preparing the next scheduled group."].includes(next.status)) void runAutomatic();
   }
 }
 chrome.alarms?.onAlarm.addListener((alarm) => {

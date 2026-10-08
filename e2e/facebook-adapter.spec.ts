@@ -102,7 +102,7 @@ test("automatic image attachment waits for a preview and verifies publication", 
   expect((await send(page, { type: "PUBLISH_POST", ...job, trackOutcome: true })).outcome).toBe("published");
 });
 
-test("image preparation can retry invalid data and reattach after the dialog is replaced", async ({ page }) => {
+test("invalid data can recover before dispatch but a replaced composer never reuploads", async ({ page }) => {
   const html = '<div role="dialog"><div role="textbox" contenteditable="true"></div><input type="file" accept="image/*" multiple><button class="post">Post</button></div>';
   await setup(page, html);
   const installPicker = async () => page.evaluate(() => {
@@ -121,8 +121,8 @@ test("image preparation can retry invalid data and reattach after the dialog is 
   expect(await send(page, { type: "PREPARE_CAPTION", ...job, attachments: [attachment] })).toMatchObject({ ok: true });
   await page.evaluate((markup) => { document.body.innerHTML = markup; }, html);
   await installPicker();
-  expect(await send(page, { type: "PREPARE_CAPTION", ...job, attachments: [attachment] })).toMatchObject({ ok: true });
-  await expect(page.locator("[role=dialog] img")).toHaveCount(1);
+  expect(await send(page, { type: "PREPARE_CAPTION", ...job, attachments: [attachment] })).toMatchObject({ ok: false, reason: "COMPOSER_CHANGED" });
+  await expect(page.locator("[role=dialog] img")).toHaveCount(0);
 });
 
 test("automatic submission distinguishes group approval from publication", async ({ page }) => {
@@ -512,7 +512,7 @@ test("synthetic clicks never notify a user submission", async ({ page }) => {
   expect(await page.evaluate(() => (window as unknown as { automaticEvents: unknown[] }).automaticEvents)).toEqual([]);
 });
 
-test("failed upload retries after recovery without duplicating previews", async ({ page }) => {
+test("upload timeout never redispatches files even when no preview appeared", async ({ page }) => {
   test.setTimeout(45_000);
   await setup(page, '<div role="dialog"><div role="textbox" contenteditable="true"></div><input type="file" accept="image/png"><button class="post">Post</button></div>');
   await page.evaluate(() => {
@@ -528,11 +528,11 @@ test("failed upload retries after recovery without duplicating previews", async 
   });
   const attachments = [{ id: "retry-image", filename: "pixel.png", mimeType: "image/png", dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4AWJiYGBgAAAAAP//XRcpzQAAAAZJREFUAwAADwADJDd96QAAAABJRU5ErkJggg==" }];
   const payload = { type: "PREPARE_CAPTION", ...job, attachments };
-  expect(await send(page, payload)).toMatchObject({ ok: false, reason: "UPLOAD_FAILED" });
-  expect(await send(page, payload)).toMatchObject({ ok: true });
-  expect(await send(page, payload)).toMatchObject({ ok: true });
-  await expect(page.locator('[role="dialog"] img')).toHaveCount(1);
-  await expect(page.locator("body")).toHaveAttribute("data-upload-attempts", "2");
+  expect(await send(page, payload)).toMatchObject({ ok: false, reason: "UPLOAD_PREVIEW_TIMEOUT" });
+  expect(await send(page, payload)).toMatchObject({ ok: false, reason: "UPLOAD_PREVIEW_TIMEOUT" });
+  expect(await send(page, payload)).toMatchObject({ ok: false, reason: "UPLOAD_PREVIEW_TIMEOUT" });
+  await expect(page.locator('[role="dialog"] img')).toHaveCount(0);
+  await expect(page.locator("body")).toHaveAttribute("data-upload-attempts", "1");
   expect(await page.evaluate(() => (window as unknown as { finalPostClicks: number }).finalPostClicks)).toBe(0);
 });
 
@@ -600,7 +600,7 @@ test("a changed preview never causes a duplicate upload", async ({ page }) => {
     const canvas = document.createElement("canvas"); canvas.width = 2; canvas.height = 2;
     image.src = canvas.toDataURL();
   });
-  expect(await send(page, payload)).toMatchObject({ ok: false, reason: "UPLOAD_FAILED" });
+  expect(await send(page, payload)).toMatchObject({ ok: false, reason: "UPLOAD_PREVIEW_UNVERIFIED" });
   await expect(page.locator("body")).toHaveAttribute("data-uploads", "1");
 });
 
@@ -620,8 +620,8 @@ test("partial previews pause retry without uploading duplicates", async ({ page 
   const preparing = send(page, payload);
   await expect(page.locator("body")).toHaveAttribute("data-uploads", "1");
   await page.clock.runFor(31_000);
-  expect(await preparing).toMatchObject({ ok: false, reason: "UPLOAD_FAILED" });
-  expect(await send(page, payload)).toMatchObject({ ok: false, reason: "UPLOAD_FAILED" });
+  expect(await preparing).toMatchObject({ ok: false, reason: "UPLOAD_PREVIEW_UNVERIFIED" });
+  expect(await send(page, payload)).toMatchObject({ ok: false, reason: "UPLOAD_PREVIEW_UNVERIFIED" });
   await expect(page.locator("body")).toHaveAttribute("data-uploads", "1");
 });
 
@@ -645,7 +645,7 @@ for (const wrongImage of [false, true]) {
     const payload = { type: "PREPARE_CAPTION", ...job, attachments: [{ id: "reencoded-image", filename: "pixel.png", mimeType: "image/png", dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4AWJiYGBgAAAAAP//XRcpzQAAAAZJREFUAwAADwADJDd96QAAAABJRU5ErkJggg==" }] };
     const result = await send(page, payload);
     expect(result.ok).toBe(!wrongImage);
-    if (wrongImage) expect(result.reason).toBe("UPLOAD_PREVIEW_UNVERIFIED");
+    if (wrongImage) expect(result.reason).toBe("UPLOAD_PREVIEW_MISMATCH");
     else expect((await send(page, payload)).ok).toBe(true);
     expect(await page.evaluate(() => (window as unknown as { uploads: number }).uploads)).toBe(1);
     expect(await page.evaluate(() => (window as unknown as { finalPostClicks: number }).finalPostClicks)).toBe(0);
@@ -694,7 +694,7 @@ for (const manual of [false, true]) {
     if (manual) {
       expect(prepared).toHaveProperty('warning');
       expect(await send(page, { type: 'ARM_USER_POST', ...job, allowUnverifiedImages: true })).toMatchObject({ ok: true });
-    } else expect(prepared.reason).toBe('UPLOAD_PREVIEW_UNVERIFIED');
+    } else expect(prepared.reason).toBe('UPLOAD_PREVIEW_MISMATCH');
     expect(await send(page, { type: 'PUBLISH_POST', ...job, attachments, allowUnverifiedImages: true })).toMatchObject({ ok: false, clicked: false });
     expect(await page.evaluate(() => (window as unknown as { finalPostClicks: number }).finalPostClicks)).toBe(0);
     await expect(page.locator('[role=dialog] img')).toHaveCount(1);
@@ -734,4 +734,213 @@ test('user posting during preparation preserves evidence and forbids another sub
   expect(await pending).toMatchObject({ ok: false, clicked: true, reason: 'ALREADY_SUBMITTED' });
   expect(await send(page, { type: 'PUBLISH_POST', ...job })).toMatchObject({ ok: false, clicked: true, reason: 'ALREADY_SUBMITTED' });
   expect(await page.evaluate(() => (window as unknown as { finalPostClicks: number }).finalPostClicks)).toBe(1);
+});
+
+const regressionPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4AWJiYGBgAAAAAP//XRcpzQAAAAZJREFUAwAADwADJDd96QAAAABJRU5ErkJggg==";
+const regressionFile = { id: "regression-image", filename: "pixel.png", mimeType: "image/png", dataUrl: "data:image/png;base64," + regressionPng };
+const regressionComposer = '<div role="dialog"><div role="textbox" contenteditable="true"></div><input type="file" accept="image/*" multiple><button class="post">Post</button></div>';
+
+for (const mode of ["delayed-multiple", "same-source-replacement", "recompressed", "composer-replaced"] as const) {
+  test("upload lineage regression: " + mode, async ({ page }) => {
+    await setup(page, regressionComposer);
+    await page.evaluate((scenario) => {
+      const input = document.querySelector<HTMLInputElement>("input")!;
+      const avatar = document.createElement("img");
+      avatar.src = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'/>";
+      input.parentElement!.append(avatar);
+      input.onchange = () => {
+        document.body.dataset.uploads = String(Number(document.body.dataset.uploads ?? 0) + 1);
+        if (scenario === "composer-replaced") { input.parentElement!.replaceWith(input.parentElement!.cloneNode(true)); return; }
+        const add = async () => {
+          for (const file of input.files!) {
+            const image = document.createElement("img"); image.width = 24; image.height = 24;
+            if (scenario === "recompressed") {
+              const bitmap = await createImageBitmap(file);
+              const canvas = document.createElement("canvas"); canvas.width = bitmap.width; canvas.height = bitmap.height;
+              canvas.getContext("2d")!.drawImage(bitmap, 0, 0); bitmap.close();
+              image.src = canvas.toDataURL("image/jpeg", 0.4);
+            } else image.src = URL.createObjectURL(file);
+            input.parentElement!.append(image);
+            if (scenario === "same-source-replacement") image.replaceWith(image.cloneNode(true));
+          }
+        };
+        if (scenario === "delayed-multiple") setTimeout(() => void add(), 250); else void add();
+      };
+    }, mode);
+    const attachments = mode === "delayed-multiple" ? [regressionFile, { ...regressionFile, id: "second-image" }] : [regressionFile];
+    const payload = { type: "PREPARE_CAPTION", ...job, attachments };
+    const result = await send(page, payload);
+    if (mode === "composer-replaced") expect(result).toMatchObject({ ok: false, reason: "COMPOSER_CHANGED" });
+    else if (mode === "recompressed") expect(result).toMatchObject({ ok: false, reason: "UPLOAD_PREVIEW_MISMATCH" });
+    else expect(result.ok).toBe(true);
+    expect((await send(page, payload)).ok).toBe(result.ok);
+    await expect(page.locator("body")).toHaveAttribute("data-uploads", "1");
+    expect(await page.evaluate(() => (window as unknown as { finalPostClicks: number }).finalPostClicks)).toBe(0);
+  });
+}
+
+for (const processing of [false, true]) {
+  test("verified identity separates readiness timeout: " + processing, async ({ page }) => {
+    await setup(page, regressionComposer);
+    await page.clock.install();
+    await page.evaluate((busy) => {
+      document.querySelector<HTMLButtonElement>("button")!.disabled = true;
+      const input = document.querySelector<HTMLInputElement>("input")!;
+      input.onchange = () => {
+        const image = document.createElement("img"); image.src = URL.createObjectURL(input.files![0]); image.width = 24; image.height = 24;
+        input.parentElement!.append(image);
+        if (busy) { const progress = document.createElement("div"); progress.setAttribute("role", "progressbar"); input.parentElement!.append(progress); }
+      };
+    }, processing);
+    const pending = send(page, { type: "PREPARE_CAPTION", ...job, attachments: [regressionFile], allowUnverifiedImages: true });
+    await expect(page.locator('[role="dialog"] img')).toHaveCount(1);
+    await page.clock.runFor(500);
+    await page.clock.runFor(61_000);
+    expect(await pending).toMatchObject({ ok: false, reason: processing ? "UPLOAD_STILL_PROCESSING" : "POST_BUTTON_DISABLED" });
+    expect(await send(page, { type: "ARM_USER_POST", ...job, allowUnverifiedImages: true })).toMatchObject({ ok: false, reason: "POST_BUTTON_DISABLED" });
+  });
+}
+
+test("concurrent publish and cancellation cannot redispatch pending upload", async ({ page }) => {
+  await setup(page, regressionComposer);
+  await page.evaluate(() => { document.querySelector<HTMLInputElement>("input")!.onchange = () => { document.body.dataset.uploads = String(Number(document.body.dataset.uploads ?? 0) + 1); }; });
+  const payload = { type: "PREPARE_CAPTION", ...job, attachments: [regressionFile] };
+  const preparing = send(page, payload);
+  await expect(page.locator("body")).toHaveAttribute("data-uploads", "1");
+  expect(await send(page, { ...payload, type: "PUBLISH_POST" })).toMatchObject({ ok: false, clicked: false, reason: "PREPARATION_IN_PROGRESS" });
+  await send(page, { type: "CANCEL_JOB", jobId: job.jobId });
+  expect((await preparing).ok).toBe(false);
+  await send(page, { type: "RESET_SAFE_JOB", jobId: job.jobId });
+  expect((await send(page, payload)).ok).toBe(false);
+  await expect(page.locator("body")).toHaveAttribute("data-uploads", "1");
+});
+
+test("durable reservation rejection after restart never dispatches file events", async ({ page }) => {
+  await setup(page, regressionComposer);
+  await page.evaluate(() => {
+    const runtime = window as unknown as { chrome: { runtime: { sendMessage: (message: { type: string }) => Promise<{ ok: boolean }> } } };
+    runtime.chrome.runtime.sendMessage = async message => ({ ok: message.type !== "UPLOAD_BEGIN" });
+    document.querySelector<HTMLInputElement>("input")!.onchange = () => { document.body.dataset.uploads = "1"; };
+  });
+  expect(await send(page, { type: "PREPARE_CAPTION", ...job, attachments: [regressionFile] })).toMatchObject({ ok: false, reason: "UPLOAD_PREVIEW_UNVERIFIED" });
+  expect(await page.locator("body").getAttribute("data-uploads")).toBeNull();
+});
+
+test("late local to CDN transition and identical-source replacement preserve verified evidence", async ({ page }) => {
+  await page.route("https://cdn.fixture.test/**", route => route.fulfill({ contentType: "image/png", body: Buffer.from(regressionPng, "base64") }));
+  await setup(page, regressionComposer);
+  await page.evaluate(() => {
+    const input = document.querySelector<HTMLInputElement>("input")!;
+    input.onchange = () => { const image = document.createElement("img"); image.src = URL.createObjectURL(input.files![0]); image.width = 24; image.height = 24; input.parentElement!.append(image); };
+  });
+  const payload = { ...job, attachments: [regressionFile] };
+  expect((await send(page, { type: "PREPARE_CAPTION", ...payload })).ok).toBe(true);
+  await page.locator('[role="dialog"] img').evaluate((image: HTMLImageElement) => { image.src = "https://cdn.fixture.test/late.png"; });
+  await expect.poll(() => page.locator('[role="dialog"] img').evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
+  await page.locator('[role="dialog"] img').evaluate(image => image.replaceWith(image.cloneNode(true)));
+  await expect.poll(() => page.locator('[role="dialog"] img').evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
+  expect(await send(page, { type: "PUBLISH_POST", ...payload })).toMatchObject({ ok: true, clicked: true });
+});
+
+test("automatic publish requires the exact intended caption", async ({ page }) => {
+  await setup(page, regressionComposer);
+  await send(page, { type: "PREPARE_CAPTION", ...job });
+  await page.getByRole("textbox").fill("Different content");
+  expect(await send(page, { type: "PUBLISH_POST", ...job, strictCaption: true })).toMatchObject({ ok: false, clicked: false, reason: "CAPTION_FORMAT_INVALID" });
+});
+
+test("extra local attachment after verification blocks automatic publish", async ({ page }) => {
+  await setup(page, regressionComposer);
+  await page.evaluate(() => {
+    const input = document.querySelector<HTMLInputElement>("input")!;
+    input.onchange = () => { const image = document.createElement("img"); image.src = URL.createObjectURL(input.files![0]); image.width = 24; image.height = 24; input.parentElement!.append(image); };
+  });
+  const payload = { ...job, attachments: [regressionFile] };
+  expect((await send(page, { type: "PREPARE_CAPTION", ...payload })).ok).toBe(true);
+  await page.locator('[role="dialog"] img').evaluate(image => image.parentElement!.append(image.cloneNode(true)));
+  expect(await send(page, { type: "PUBLISH_POST", ...payload })).toMatchObject({ ok: false, clicked: false, reason: "UPLOAD_PREVIEW_UNVERIFIED" });
+});
+
+for (const withImages of [false, true]) {
+  test("requested AUTO bypass waits five seconds and submits once: images=" + withImages, async ({ page }) => {
+    await setup(page, regressionComposer);
+    await page.clock.install();
+    await page.evaluate(() => {
+      const editor = document.querySelector<HTMLElement>('[role="textbox"]')!;
+      editor.addEventListener("paste", event => {
+        event.preventDefault(); editor.textContent = "Flattened Facebook text";
+        document.body.dataset.captionFilled = "true";
+      });
+      document.querySelector<HTMLInputElement>("input")!.onchange = () => {
+        document.body.dataset.uploads = String(Number(document.body.dataset.uploads ?? 0) + 1);
+        const canvas = document.createElement("canvas"); canvas.width = 3; canvas.height = 3;
+        canvas.getContext("2d")!.fillRect(0, 0, 3, 3);
+        const image = document.createElement("img"); image.src = canvas.toDataURL(); image.width = 24; image.height = 24;
+        document.querySelector('[role="dialog"]')!.append(image);
+      };
+      document.querySelector<HTMLButtonElement>("button")!.onclick = () => {
+        const status = document.createElement("div"); status.setAttribute("role", "status"); status.textContent = "Your post was published."; document.body.append(status);
+      };
+    });
+    const payload = { ...job, caption: "Original line one\nOriginal line two", linkUrl: null, skipContentVerification: true, attachments: withImages ? [regressionFile] : [] };
+    let completed = false;
+    const preparing = send(page, { type: "PREPARE_CAPTION", ...payload }).then(result => { completed = true; return result; });
+    await expect(page.locator("body")).toHaveAttribute(withImages ? "data-uploads" : "data-caption-filled", withImages ? "1" : "true");
+    await page.clock.runFor(4900);
+    expect(completed).toBe(false);
+    expect(await page.evaluate(() => (window as unknown as { finalPostClicks: number }).finalPostClicks)).toBe(0);
+    await page.clock.runFor(400);
+    expect((await preparing).ok).toBe(true);
+    const publishing = send(page, { type: "PUBLISH_POST", ...payload, trackOutcome: true });
+    await expect.poll(() => page.evaluate(() => (window as unknown as { finalPostClicks: number }).finalPostClicks)).toBe(1);
+    await page.clock.runFor(1000);
+    expect(await publishing).toMatchObject({ ok: true, clicked: true, outcome: "published" });
+    expect(await send(page, { type: "PUBLISH_POST", ...payload })).toMatchObject({ ok: false, clicked: true, reason: "ALREADY_SUBMITTED" });
+    if (withImages) await expect(page.locator("body")).toHaveAttribute("data-uploads", "1");
+  });
+}
+
+test("stopping during the five-second AUTO delay prevents publication", async ({ page }) => {
+  await setup(page, regressionComposer);
+  await page.clock.install();
+  const preparing = send(page, { type: "PREPARE_CAPTION", ...job, skipContentVerification: true });
+  await expect(page.getByRole("textbox")).toContainText(job.caption);
+  await send(page, { type: "CANCEL_JOB", jobId: job.jobId });
+  await page.clock.runFor(6000);
+  expect((await preparing).ok).toBe(false);
+  expect((await send(page, { type: "PUBLISH_POST", ...job, skipContentVerification: true })).ok).toBe(false);
+  expect(await page.evaluate(() => (window as unknown as { finalPostClicks: number }).finalPostClicks)).toBe(0);
+});
+
+test("AUTO bypass still refuses a disabled Post button", async ({ page }) => {
+  await setup(page, regressionComposer);
+  await page.clock.install();
+  await page.getByRole("button", { name: "Post", exact: true }).evaluate((button: HTMLButtonElement) => { button.disabled = true; });
+  const preparing = send(page, { type: "PREPARE_CAPTION", ...job, skipContentVerification: true });
+  await expect(page.getByRole("textbox")).toContainText(job.caption);
+  await page.clock.runFor(31_000);
+  expect(await preparing).toMatchObject({ ok: false, clicked: false, reason: "POST_BUTTON_DISABLED" });
+});
+
+test("unchecked AUTO recovery reuses an uncertain upload instead of sending files again", async ({ page }) => {
+  await setup(page, regressionComposer);
+  await page.clock.install();
+  await page.evaluate(() => {
+    document.querySelector<HTMLInputElement>("input")!.onchange = () => {
+      document.body.dataset.uploads = String(Number(document.body.dataset.uploads ?? 0) + 1);
+      const canvas = document.createElement("canvas"); canvas.width = 3; canvas.height = 3;
+      canvas.getContext("2d")!.fillRect(0, 0, 3, 3);
+      const image = document.createElement("img"); image.src = canvas.toDataURL(); image.width = 24; image.height = 24;
+      document.querySelector('[role="dialog"]')!.append(image);
+    };
+  });
+  const payload = { ...job, attachments: [regressionFile] };
+  const strict = send(page, { type: "PREPARE_CAPTION", ...payload });
+  await expect(page.locator("body")).toHaveAttribute("data-uploads", "1");
+  await page.clock.runFor(400);
+  expect(await strict).toMatchObject({ ok: false, reason: "UPLOAD_PREVIEW_MISMATCH" });
+  const recovery = send(page, { type: "PREPARE_CAPTION", ...payload, skipContentVerification: true });
+  await page.clock.runFor(5400);
+  expect((await recovery).ok).toBe(true);
+  await expect(page.locator("body")).toHaveAttribute("data-uploads", "1");
 });

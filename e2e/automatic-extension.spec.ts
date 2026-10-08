@@ -5,7 +5,7 @@ import { test, expect, chromium, type Route } from "@playwright/test";
 for (const scenario of [{ legacyPreference: false, autoEnabled: false }, { legacyPreference: true, autoEnabled: false }, { legacyPreference: false, autoEnabled: true }]) {
 const { legacyPreference, autoEnabled } = scenario;
 test(`assisted campaign with legacy preference ${legacyPreference} and explicit Post switch ${autoEnabled} proceeds while Facebook resources keep loading`, async () => {
-  test.setTimeout(60_000);
+  test.setTimeout(90_000);
   const campaignId = "11111111-1111-4111-8111-111111111111";
   const caption = "First line\n\nSecond section\nLast line";
   const image = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4AWJiYGBgAAAAAP//XRcpzQAAAAZJREFUAwAADwADJDd96QAAAABJRU5ErkJggg==", "base64");
@@ -94,7 +94,7 @@ test(`assisted campaign with legacy preference ${legacyPreference} and explicit 
             post.onclick = () => {
               const notice = document.createElement('div');
               notice.setAttribute('role', 'status');
-              notice.textContent = 'Your post was published.';
+              notice.textContent = '${autoEnabled ? 'No publication confirmation in this fixture.' : 'Your post was published.'}';
               document.body.append(notice);
             };
           };
@@ -166,7 +166,7 @@ test(`assisted campaign with legacy preference ${legacyPreference} and explicit 
       await groupPage.getByRole("button", { name: "Post", exact: true }).click();
       await expect.poll(() => confirmed.length).toBe(number);
     }
-    await expect.poll(async () => { const current = await state(); if (current?.error) throw new Error(current.error); return current?.enabled; }, { timeout: 20_000 }).toBe(false);
+    await expect.poll(async () => { const current = await state(); if (current?.error) throw new Error(current.error); return current?.enabled; }, { timeout: 65_000 }).toBe(false);
     expect(reservations).toHaveLength(groupCount);
     expect(confirmed).toEqual(Array.from({ length: groupCount }, (_, index) => `/api/extension/jobs/job-${index + 1}/posted`));
     await popup.screenshot({ path: `docs/repair-evidence/post-mode-${autoEnabled ? "on" : "off"}-${legacyPreference}.png` });

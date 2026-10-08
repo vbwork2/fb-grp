@@ -197,14 +197,14 @@ export default async function QueuePage({
                     <td>
                       <span
                         className={`badge ${
-                          job.status === "POSTED"
+                          job.status === "POSTED" && job.errorCode !== "POST_OUTCOME_UNVERIFIED"
                             ? "green"
                             : job.status === "FAILED"
                             ? "red"
                             : "amber"
                         }`}
                       >
-                        <T>{job.status}</T>
+                        <T>{job.errorCode === "POST_OUTCOME_UNVERIFIED" ? "Submitted (unverified)" : job.status}</T>
                       </span>
                     </td>
                     <td className="text-slate-500 text-xs">

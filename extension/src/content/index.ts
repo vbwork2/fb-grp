@@ -1,18 +1,25 @@
 import { classifyPostSignals } from "./post-outcome";
 
-type ComposerMessage = { type?: string; jobId?: string; expectedGroupUrl?: string; caption?: string; linkUrl?: string; attachments?: { id: string; filename: string; mimeType: string; dataUrl: string }[]; trackOutcome?: boolean; phase?: string; status?: string; error?: string; enabled?: boolean; generation?: number; uploadError?: string; allowUnverifiedImages?: boolean };
+type ComposerMessage = { type?: string; jobId?: string; expectedGroupUrl?: string; caption?: string; linkUrl?: string; attachments?: { id: string; filename: string; mimeType: string; dataUrl: string }[]; trackOutcome?: boolean; phase?: string; status?: string; error?: string; enabled?: boolean; generation?: number; uploadError?: string; allowUnverifiedImages?: boolean; strictCaption?: boolean; skipContentVerification?: boolean; autoClickPost?: boolean };
 type AdapterResult = { ok: boolean; clicked?: boolean; reason?: string; message?: string; outcome?: "published" | "approval" | "unknown"; warning?: string };
 const attemptedJobs = new Set<string>();
 const cancelledJobs = new Set<string>();
 const jobGenerations = new Map<string, number>();
 const uploadedFiles = new Map<string, Set<string>>();
+const uploadManifests = new Map<string, string>();
+const uploadErrors = new Map<string, string>();
+const automaticReadyAt = new Map<string, number>();
+const requestLocks = new Set<string>();
 const uploadResults = new Map<string, Promise<boolean>>();
 const uploadScopes = new Map<string, Element>();
 const uploadAttempts = new Map<string, Map<HTMLImageElement, string>>();
+const uploadEvidence = new Map<string, { observed: number; verified: number; localToCdn: boolean; methods: Set<string> }>();
+const previewObservers = new Map<string, { observer: MutationObserver; detach: () => void }>();
 const verifiedPreviews = new Map<string, Map<HTMLImageElement, string>>();
 function clearUploadState(jobId: string): void {
   uploadResults.delete(jobId); uploadedFiles.delete(jobId); uploadScopes.delete(jobId);
   uploadAttempts.delete(jobId); verifiedPreviews.delete(jobId);
+  previewObservers.get(jobId)?.observer.disconnect(); previewObservers.get(jobId)?.detach(); previewObservers.delete(jobId); uploadErrors.delete(jobId); uploadManifests.delete(jobId); uploadEvidence.delete(jobId);
 }
 let preparedJob: { id: string; editor: HTMLElement } | undefined;
 
@@ -162,7 +169,7 @@ async function fill(editor: HTMLElement, message: ComposerMessage): Promise<bool
     const paste = new ClipboardEvent("paste", { clipboardData: clipboard, bubbles: true, cancelable: true });
     editor.dispatchEvent(paste);
     if (paste.defaultPrevented) {
-      const valid = await waitFor(() => captionMatches(editor, text) ? true : undefined, 1800);
+      const valid = message.skipContentVerification ? !cancelled(message) && editor.isConnected : await waitFor(() => captionMatches(editor, text) ? true : undefined, 1800);
       if (valid && message.jobId) preparedJob = { id: message.jobId, editor };
       return Boolean(valid);
     }
@@ -181,7 +188,7 @@ async function fill(editor: HTMLElement, message: ComposerMessage): Promise<bool
   }
   // Facebook can reconcile its Lexical state asynchronously. Wait for a
   // stable-looking result instead of declaring failure after a fixed 120 ms.
-  const valid = await waitFor(() => captionMatches(editor, text) ? true : undefined, 1800);
+  const valid = message.skipContentVerification ? !cancelled(message) && editor.isConnected : await waitFor(() => captionMatches(editor, text) ? true : undefined, 1800);
   if (valid && message.jobId) preparedJob = { id: message.jobId, editor };
   return Boolean(valid);
 }
@@ -202,6 +209,23 @@ async function waitFor<T>(read: () => T | undefined, milliseconds: number): Prom
     function check() { const value = read(); if (value !== undefined) finish(value); }
     check();
   });
+}
+
+async function waitForAutomaticPost(scope: Element, message: ComposerMessage): Promise<boolean> {
+  if (!message.jobId) return false;
+  const readyAt = automaticReadyAt.get(message.jobId) ?? Date.now() + 5000;
+  automaticReadyAt.set(message.jobId, readyAt);
+  const ready = await waitFor(() => {
+    if (cancelled(message)) return false;
+    if (!scope.isConnected || openComposerEditor()?.closest("[role='dialog'], form") !== scope) {
+      message.uploadError = "COMPOSER_CHANGED"; return false;
+    }
+    const buttons = [...scope.querySelectorAll<HTMLElement>("button,[role='button']")].filter(button => visible(button) && /^(post|publish|đăng|đăng bài)$/i.test(labelOf(button)));
+    const enabled = buttons.length === 1 && !buttons[0].matches(":disabled,[aria-disabled='true']");
+    return Date.now() >= readyAt && enabled && !scope.querySelector("[role='progressbar'],[aria-busy='true']") ? true : undefined;
+  }, 30_000);
+  if (!ready) message.uploadError ??= scope.querySelector("[role='progressbar'],[aria-busy='true']") ? "UPLOAD_STILL_PROCESSING" : "POST_BUTTON_DISABLED";
+  return Boolean(ready);
 }
 
 function cancelled(message: ComposerMessage) { return Boolean(message.jobId && (cancelledJobs.has(message.jobId) || (message.expectedGroupUrl && groupPath(location.href) !== groupPath(message.expectedGroupUrl)) || message.generation !== (jobGenerations.get(message.jobId) ?? 0))); }
@@ -233,27 +257,42 @@ async function pixelDigest(blob: Blob, width?: number, height?: number): Promise
 
 async function attachImages(scope: Element, message: ComposerMessage): Promise<boolean> {
   if (!message.attachments?.length || !message.jobId) return true;
-  if (uploadScopes.get(message.jobId) !== scope) {
-    uploadResults.delete(message.jobId);
-    uploadedFiles.delete(message.jobId);
-    uploadAttempts.delete(message.jobId);
-    verifiedPreviews.delete(message.jobId);
-    uploadScopes.set(message.jobId, scope);
+  const manifest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(message.attachments)))), byte => byte.toString(16).padStart(2, "0")).join("");
+  if (uploadAttempts.has(message.jobId) && uploadManifests.get(message.jobId) !== manifest) { message.uploadError = "UPLOAD_PREVIEW_MISMATCH"; return false; }
+  uploadManifests.set(message.jobId, manifest);
+  if (uploadAttempts.has(message.jobId) && uploadScopes.get(message.jobId) !== scope) {
+    message.uploadError = "COMPOSER_CHANGED";
+    return false;
   }
+  uploadScopes.set(message.jobId, scope);
   const previews = verifiedPreviews.get(message.jobId);
-  if (previews && [...previews].some(([image, source]) => !scope.contains(image) || image.src !== source || !image.complete || !image.naturalWidth)) return false;
+  const baseline = uploadAttempts.get(message.jobId);
+  const unexpectedPreview = previews && [...scope.querySelectorAll<HTMLImageElement>("img")].some(image => !previews.has(image) && baseline?.get(image) !== image.src && /^(blob:|data:image\/)/.test(image.src));
+  if (!message.skipContentVerification && previews && (uploadErrors.has(message.jobId) || unexpectedPreview || [...previews].some(([image, source]) => !scope.contains(image) || image.src !== source || !image.complete || !image.naturalWidth))) {
+    message.uploadError = "UPLOAD_PREVIEW_UNVERIFIED";
+    return false;
+  }
   const previous = uploadResults.get(message.jobId);
-  if (previous) return previous;
+  if (previous) {
+    const success = await previous;
+    if (!success && message.skipContentVerification && uploadAttempts.has(message.jobId)) {
+      // The user selected unchecked AUTO recovery. Reuse the existing upload;
+      // never inject the files again after a failed preview verification.
+      const ready = await waitForAutomaticPost(scope, message);
+      if (ready) { uploadResults.set(message.jobId, Promise.resolve(true)); uploadErrors.delete(message.jobId); }
+      return ready;
+    }
+    message.uploadError = uploadErrors.get(message.jobId);
+    return success;
+  }
+  // Keep the result after dispatch, including timeout and cancellation.
   const result = uploadImages(scope, message);
   uploadResults.set(message.jobId, result);
-  try {
-    const success = await result;
-    if (!success && uploadResults.get(message.jobId) === result) uploadResults.delete(message.jobId);
-    return success;
-  } catch (cause) {
-    if (uploadResults.get(message.jobId) === result) uploadResults.delete(message.jobId);
-    throw cause;
-  }
+  const success = await result;
+  if (!uploadAttempts.has(message.jobId)) uploadResults.delete(message.jobId);
+  if (success) uploadErrors.delete(message.jobId);
+  if (!success) uploadErrors.set(message.jobId, message.uploadError ?? "UPLOAD_PREVIEW_UNVERIFIED");
+  return success;
 }
 
 async function uploadImages(scope: Element, message: ComposerMessage): Promise<boolean> {
@@ -270,7 +309,7 @@ async function uploadImages(scope: Element, message: ComposerMessage): Promise<b
     const triggers = [...scope.querySelectorAll<HTMLElement>("button,[role='button']")].filter((element) =>
       visible(element) && /^(photo\s*\/\s*videos?|photos\s*\/\s*videos|ảnh\s*\/\s*video|ảnh và video)(?:$|[\s.,…])/i.test(labelOf(element))
     );
-    if (triggers.length !== 1) return false;
+    if (triggers.length !== 1) { message.uploadError = "UPLOAD_INPUT_NOT_FOUND"; return false; }
     triggers[0].click();
     openedPhoto = true;
   }
@@ -285,7 +324,7 @@ async function uploadImages(scope: Element, message: ComposerMessage): Promise<b
     const global = inputs(document).filter((input) => !previousInputs.has(input));
     return global.length === 1 ? global[0] : undefined;
   }, 6000);
-  if (!input || (!input.multiple && pending.length > 1) || cancelled(message)) return false;
+  if (!input || (!input.multiple && pending.length > 1) || cancelled(message)) { message.uploadError = "UPLOAD_INPUT_NOT_FOUND"; return false; }
   const failedBaseline = uploadAttempts.get(message.jobId);
   if (failedBaseline && ([...currentScope().querySelectorAll<HTMLImageElement>("img")].some((image) => failedBaseline.get(image) !== image.src) || currentScope().querySelector("[role='progressbar'],[aria-busy='true']"))) return false;
   const transfer = new DataTransfer();
@@ -298,13 +337,22 @@ async function uploadImages(scope: Element, message: ComposerMessage): Promise<b
     transfer.items.add(candidate);
   }
   if (cancelled(message)) return false;
+  if (!input.isConnected || currentScope() !== scope || !scope.isConnected) { message.uploadError = "COMPOSER_CHANGED"; return false; }
   const previousImages = new Map([...currentScope().querySelectorAll<HTMLImageElement>("img")].map((image) => [image, image.src]));
-  uploadAttempts.set(message.jobId, previousImages);
   const localSources = new Map<HTMLImageElement, string>();
   const localBlobs = new Map<string, Promise<Blob | undefined>>();
+  const lineage = new Map<string, string>();
+  const evidence = { observed: 0, verified: 0, localToCdn: false, methods: new Set<string>() };
+  uploadEvidence.set(message.jobId, evidence);
   let userChangedImages = false;
   const capture = (image: HTMLImageElement, source = image.src) => {
-    if (previousImages.get(image) === source || !/^(blob:|data:image\/)/.test(source)) return;
+    if (previousImages.get(image) === source) return;
+    if (!/^(blob:|data:image\/)/.test(source)) {
+      const original = lineage.get(source);
+      if (original) localSources.set(image, original);
+      return;
+    }
+    lineage.set(source, source);
     localSources.set(image, source);
     if (!localBlobs.has(source)) localBlobs.set(source, fetch(source).then((response) => response.blob()).catch(() => undefined));
   };
@@ -313,6 +361,8 @@ async function uploadImages(scope: Element, message: ComposerMessage): Promise<b
       if (change.type === "attributes" && change.target instanceof HTMLImageElement) {
         if (change.oldValue) capture(change.target, change.oldValue);
         capture(change.target);
+        const original = localSources.get(change.target);
+        if (original && /^https:/.test(change.target.src) && /^(blob:|data:image\/)/.test(change.oldValue ?? "")) { lineage.set(change.target.src, original); evidence.localToCdn = true; }
       }
       for (const node of change.addedNodes) {
         if (!(node instanceof Element)) continue;
@@ -336,20 +386,40 @@ async function uploadImages(scope: Element, message: ComposerMessage): Promise<b
   uploadScope.addEventListener("change", onUserChange, true);
   uploadScope.addEventListener("click", onUserChange, true);
   try {
+  // Persist the upload reservation before dispatch. A new document must not
+  // assume the old composer is empty after a worker or tab restart.
+  const reservation = await chrome.runtime.sendMessage({ type: "UPLOAD_BEGIN", jobId: message.jobId }) as { ok?: boolean };
+  if (!reservation?.ok || cancelled(message)) { message.uploadError = "UPLOAD_PREVIEW_UNVERIFIED"; return false; }
+  uploadAttempts.set(message.jobId, previousImages);
   input.files = transfer.files;
   input.dispatchEvent(new Event("input", { bubbles: true }));
   input.dispatchEvent(new Event("change", { bubbles: true }));
-  reportStage(message, "VERIFY_UPLOAD");
+  reportStage(message, message.skipContentVerification ? "WAIT_AUTO_POST" : "VERIFY_UPLOAD");
+  if (message.skipContentVerification) {
+    automaticReadyAt.set(message.jobId, Date.now() + 5000);
+    const ready = await waitForAutomaticPost(uploadScope, message);
+    if (ready) {
+      for (const file of pending) attached.add(file.id);
+      uploadedFiles.set(message.jobId, attached);
+    }
+    return ready;
+  }
   const success = Boolean(await waitFor(() => {
     if (cancelled(message) || userChangedImages) return false;
-    scope = currentScope();
+    if (currentScope() !== uploadScope || !uploadScope.isConnected) { message.uploadError = "COMPOSER_CHANGED"; return false; }
+    scope = uploadScope;
+    for (const [image, original] of localSources) {
+      if (scope.contains(image)) continue;
+      const replacements = [...scope.querySelectorAll<HTMLImageElement>("img")].filter(candidate => lineage.get(candidate.src) === original && !localSources.has(candidate));
+      if (replacements.length === 1) { localSources.delete(image); localSources.set(replacements[0], original); }
+    }
     for (const image of scope.querySelectorAll<HTMLImageElement>("img")) {
       capture(image);
       if (previousImages.get(image) !== image.src && !image.naturalWidth) { image.loading = "eager"; image.scrollIntoView({ block: "nearest" }); }
     }
     const previews = [...scope.querySelectorAll<HTMLImageElement>("img")].filter((image) => visible(image) && image.complete && image.naturalWidth > 0 && (/^(blob:|data:image\/)/.test(image.src) || localSources.has(image)) && previousImages.get(image) !== image.src);
-    const post = [...scope.querySelectorAll<HTMLElement>("button,[role='button']")].find((element) => /^(post|publish|đăng|đăng bài)$/i.test((element.getAttribute("aria-label") ?? element.innerText).trim()));
-    return previews.length >= pending.length && post && !post.matches(":disabled,[aria-disabled='true']") && !scope.querySelector("[role='progressbar'],[aria-busy='true']") ? true : undefined;
+    evidence.observed = previews.length;
+    return previews.length >= pending.length ? true : undefined;
   }, 30_000));
   if (success) {
     // A CDN replacement is accepted only on the same image element whose local
@@ -358,6 +428,7 @@ async function uploadImages(scope: Element, message: ComposerMessage): Promise<b
     const previews = [...scope.querySelectorAll<HTMLImageElement>("img")].filter((image) => previousImages.get(image) !== image.src && (/^(blob:|data:image\/)/.test(image.src) || localSources.has(image)));
     const digest = async (data: ArrayBuffer) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", data)), (byte) => byte.toString(16).padStart(2, "0")).join("");
     const remaining = await Promise.all([...transfer.files].map(async (file) => ({ file, hash: await digest(await file.arrayBuffer()) })));
+    const matchedSources = new Map<HTMLImageElement, string>();
     for (const preview of previews) {
       try {
         const localSource = localSources.get(preview) ?? preview.src;
@@ -366,29 +437,78 @@ async function uploadImages(scope: Element, message: ComposerMessage): Promise<b
         const bytes = await blob.arrayBuffer();
         const hash = await digest(bytes);
         let match = remaining.findIndex((candidate) => candidate.hash === hash);
+        let method = "bytes";
         if (match === -1) {
           // Facebook can re-encode local previews. Require identical decoded pixels,
           // including a resize to the preview dimensions, rather than identical file bytes.
-          const previewPixels = await pixelDigest(new Blob([bytes]), preview.naturalWidth, preview.naturalHeight);
+          const bitmap = await createImageBitmap(new Blob([bytes]));
+          const width = bitmap.width, height = bitmap.height; bitmap.close();
+          const previewPixels = await pixelDigest(new Blob([bytes]), width, height);
           if (previewPixels) {
             for (let index = 0; index < remaining.length; index++) {
-              if (await pixelDigest(remaining[index].file, preview.naturalWidth, preview.naturalHeight) === previewPixels) { match = index; break; }
+              if (await pixelDigest(remaining[index].file, width, height) === previewPixels) { match = index; method = "decoded-pixels"; break; }
             }
           }
         }
-        if (match === -1) { message.uploadError = "UPLOAD_PREVIEW_UNVERIFIED"; return false; }
+        if (match === -1) { message.uploadError = "UPLOAD_PREVIEW_MISMATCH"; return false; }
+        evidence.verified++; evidence.methods.add(method);
+        matchedSources.set(preview, localSource);
         remaining.splice(match, 1);
       } catch { message.uploadError = "UPLOAD_PREVIEW_UNVERIFIED"; return false; }
     }
     if (remaining.length || cancelled(message) || userChangedImages) return false;
+    const ready = await waitFor(() => {
+      if (cancelled(message) || userChangedImages) return false;
+      if (currentScope() !== uploadScope || !uploadScope.isConnected) { message.uploadError = "COMPOSER_CHANGED"; return false; }
+      if (previews.some(image => localSources.get(image) !== matchedSources.get(image) || (!/^(blob:|data:image\/)/.test(image.src) && lineage.get(image.src) !== matchedSources.get(image)))) {
+        message.uploadError = "UPLOAD_PREVIEW_UNVERIFIED"; return false;
+      }
+      if (previews.some(image => !scope.contains(image) || !image.complete || !image.naturalWidth)) return undefined;
+      const buttons = [...scope.querySelectorAll<HTMLElement>("button,[role='button']")].filter(element => visible(element) && /^(post|publish|đăng|đăng bài)$/i.test(labelOf(element)));
+      return buttons.length === 1 && !buttons[0].matches(":disabled,[aria-disabled='true']") && !scope.querySelector("[role='progressbar'],[aria-busy='true']") ? true : undefined;
+    }, 30_000);
+    if (!ready) {
+      message.uploadError ??= scope.querySelector("[role='progressbar'],[aria-busy='true']") ? "UPLOAD_STILL_PROCESSING" : "POST_BUTTON_DISABLED";
+      return false;
+    }
     for (const file of pending) attached.add(file.id);
     uploadedFiles.set(message.jobId, attached);
-    verifiedPreviews.set(message.jobId, new Map(previews.map((image) => [image, image.src])));
-    uploadAttempts.delete(message.jobId);
+    const verified = new Map(previews.map((image) => [image, image.src]));
+    verifiedPreviews.set(message.jobId, verified);
+    // Carry proof only through a recorded local-to-remote transition or an
+    // unambiguous replacement retaining exactly the verified source.
+    const tracker = new MutationObserver(changes => {
+      for (const change of changes) {
+        if (change.target instanceof HTMLImageElement && verified.has(change.target) && change.type === "attributes") {
+          const source = verified.get(change.target)!;
+          if (change.oldValue === source && /^(blob:|data:image\/)/.test(source) && /^https:/.test(change.target.src)) verified.set(change.target, change.target.src);
+        }
+      }
+      for (const [image, source] of verified) {
+        if (scope.contains(image)) continue;
+        const replacements = [...scope.querySelectorAll<HTMLImageElement>("img")].filter(candidate => candidate.src === source && !verified.has(candidate));
+        if (replacements.length === 1) { verified.delete(image); verified.set(replacements[0], source); }
+      }
+    });
+    tracker.observe(scope, { subtree: true, childList: true, attributes: true, attributeFilter: ["src"], attributeOldValue: true });
+    const onReviewedImageChange = (event: Event) => {
+      if (!event.isTrusted) return;
+      const target = event.target;
+      const button = target instanceof Element ? target.closest<HTMLElement>("button,[role='button']") : undefined;
+      if ((event.type === "change" && target instanceof HTMLInputElement && target.type === "file") ||
+          (button && !/^(post|publish|đăng|đăng bài)$/i.test(labelOf(button)))) uploadErrors.set(message.jobId!, "UPLOAD_PREVIEW_UNVERIFIED");
+    };
+    scope.addEventListener("change", onReviewedImageChange, true);
+    scope.addEventListener("click", onReviewedImageChange, true);
+    previewObservers.set(message.jobId, { observer: tracker, detach: () => {
+      scope.removeEventListener("change", onReviewedImageChange, true);
+      scope.removeEventListener("click", onReviewedImageChange, true);
+    } });
+    // Retain dispatch evidence for diagnostics and safe retries.
   }
   if (!success && !cancelled(message)) {
     const shown = [...currentScope().querySelectorAll<HTMLImageElement>("img")].filter((image) => visible(image) && image.complete && image.naturalWidth > 0 && previousImages.get(image) !== image.src);
-    if (shown.length >= pending.length) message.uploadError = "UPLOAD_PREVIEW_UNVERIFIED";
+    message.uploadError ??= shown.length ? "UPLOAD_PREVIEW_UNVERIFIED" : "UPLOAD_PREVIEW_TIMEOUT";
   }
   return success;
   } finally {
@@ -449,21 +569,39 @@ async function handle(message: ComposerMessage): Promise<AdapterResult> {
       return { ok: false, clicked: false, reason: "CAPTION_FORMAT_INVALID", message: "Facebook could not preserve the caption formatting. Review the text and line breaks before publishing." };
     }
   }
+  if (message.skipContentVerification && !message.attachments?.length) {
+    reportStage(message, "WAIT_AUTO_POST");
+    if (message.type === "PREPARE_CAPTION" && message.jobId) automaticReadyAt.set(message.jobId, Date.now() + 5000);
+    if (!scope || !(await waitForAutomaticPost(scope, message))) return { ok: false, clicked: false, reason: message.uploadError ?? "POST_BUTTON_DISABLED", message: "Facebook has not enabled the Post button. Finish editing or uploading images first." };
+  }
   if (message.attachments?.length) {
     reportStage(message, "ATTACH_IMAGES");
     if (!scope || !(await attachImages(scope, message))) {
       if (message.jobId && attemptedJobs.has(message.jobId)) return { ok: false, clicked: true, reason: "ALREADY_SUBMITTED", message: "Review the previous Facebook post before continuing." };
-      if (!publish && message.allowUnverifiedImages && !cancelled(message)) return { ok: true, clicked: false, warning: "Review the caption and attached images on Facebook, then click Post yourself. Image preview verification is unavailable." };
-      return { ok: false, clicked: false, reason: message.uploadError ?? "UPLOAD_FAILED", message: message.uploadError === "UPLOAD_PREVIEW_UNVERIFIED" ? "Facebook shows images, but their previews could not be verified. Do not upload them again; review the post manually." : "Images could not be attached or did not finish uploading. Automatic posting was paused." };
+      if (!publish && message.allowUnverifiedImages && !cancelled(message) && scope?.isConnected && openComposerEditor() === editor && !scope.querySelector("[role='progressbar'],[aria-busy='true']") && [...scope.querySelectorAll<HTMLElement>("button,[role='button']")].filter(button => visible(button) && /^(post|publish|đăng|đăng bài)$/i.test(labelOf(button)) && !button.matches(":disabled,[aria-disabled='true']")).length === 1) return { ok: true, clicked: false, warning: "Review the caption and attached images on Facebook, then click Post yourself. Image preview verification is unavailable." };
+      const descriptions: Record<string, string> = {
+        UPLOAD_INPUT_NOT_FOUND: "The Facebook image picker could not be identified. Open Photo/video and review the composer.",
+        UPLOAD_PREVIEW_TIMEOUT: "No verifiable preview appeared before the timeout. Images may already be uploading; do not upload them again.",
+        UPLOAD_PREVIEW_MISMATCH: "The preview bytes and decoded pixels do not match the requested images. Review the attachments manually.",
+        UPLOAD_PREVIEW_UNVERIFIED: "Facebook shows images, but their previews could not be verified. Do not upload them again; review the post manually.",
+        UPLOAD_STILL_PROCESSING: "Facebook is still processing the images. Wait and review the composer; do not upload again.",
+        POST_BUTTON_DISABLED: "Facebook has not enabled the Post button. Finish editing or uploading images first.",
+        COMPOSER_CHANGED: "The Facebook composer changed during preparation. Review the draft; images will not be uploaded again.",
+      };
+      return { ok: false, clicked: false, reason: message.uploadError ?? "UPLOAD_FAILED", message: descriptions[message.uploadError ?? ""] ?? "Images could not be attached or did not finish uploading. Automatic posting was paused." };
     }
   }
+  if (publish && message.skipContentVerification && (!scope || !(await waitForAutomaticPost(scope, message)))) return { ok: false, clicked: false, reason: message.uploadError ?? "POST_BUTTON_DISABLED" };
+  if (message.jobId && attemptedJobs.has(message.jobId)) return { ok: false, clicked: true, reason: "ALREADY_SUBMITTED" };
+  if (!editor.isConnected || openComposerEditor() !== editor) return { ok: false, clicked: false, reason: "COMPOSER_CHANGED" };
   if (!publish) {
     reportStage(message, "PREPARED");
     return { ok: true, clicked: false };
   }
   const text = editorText(editor);
   if (!text?.trim()) return { ok: false, clicked: false, reason: "EMPTY_CAPTION", message: "The Facebook caption is empty. Prepare the caption before publishing." };
-  if (lostCaptionLineBreaks(editor, message)) return { ok: false, clicked: false, reason: "CAPTION_FORMAT_INVALID", message: "Facebook could not preserve the caption formatting. Review the text and line breaks before publishing." };
+  if (!message.skipContentVerification && message.strictCaption && !captionMatches(editor, captionText(message))) return { ok: false, clicked: false, reason: "CAPTION_FORMAT_INVALID", message: "The caption changed during preparation. Review it before publishing." };
+  if (!message.skipContentVerification && lostCaptionLineBreaks(editor, message)) return { ok: false, clicked: false, reason: "CAPTION_FORMAT_INVALID", message: "Facebook could not preserve the caption formatting. Review the text and line breaks before publishing." };
   const buttons = [...scope!.querySelectorAll<HTMLElement>("button, [role='button']")].filter((element) => visible(element) && /^(post|publish|đăng|đăng bài)$/i.test((element.getAttribute("aria-label") ?? element.innerText).trim()));
   if (buttons.length !== 1) return { ok: false, clicked: false, reason: "POST_BUTTON_NOT_FOUND", message: "The Facebook Post button could not be identified. Publish directly on Facebook." };
   const button = buttons[0];
@@ -473,8 +611,9 @@ async function handle(message: ComposerMessage): Promise<AdapterResult> {
   if (cancelled(message)) return { ok: false, clicked: false, message: "Automatic posting was stopped." };
   const previousNotices = new Set(notices());
   attemptedJobs.add(message.jobId!);
+  const pendingOutcome = message.trackOutcome ? outcome(previousNotices, message) : undefined;
   button.click();
-  if (message.trackOutcome) return { ok: true, clicked: true, outcome: await outcome(previousNotices, message) };
+  if (pendingOutcome) return { ok: true, clicked: true, outcome: await pendingOutcome };
   return { ok: true, clicked: true, message: "Publish was sent to Facebook. Check the result, then confirm it in history." };
 }
 
@@ -498,7 +637,7 @@ function renderProgress(message: ComposerMessage): void {
     PREPARING: "Đang tìm ô viết bài và điền nội dung",
     SUBMITTING: "Đang đăng và xác nhận kết quả",
     AWAITING_USER: "Bài đã sẵn sàng — hãy bấm Đăng trên Facebook",
-    VERIFYING: "Đang kiểm tra kết quả bài bạn vừa đăng",
+    VERIFYING: message.autoClickPost ? "Đang đăng bài — chờ chuyển nhóm" : "Đang kiểm tra kết quả bài bạn vừa đăng",
     WAITING: "Đang chờ lịch đăng tiếp theo",
     PAUSED: "Đã tạm dừng — cần kiểm tra"
   };
@@ -510,7 +649,7 @@ function renderProgress(message: ComposerMessage): void {
     : message.phase === "AWAITING_USER"
       ? "Kiểm tra nội dung và ảnh, sau đó tự bấm Đăng trong cửa sổ Facebook. Groupflow sẽ kiểm tra kết quả."
       : message.phase === "VERIFYING"
-        ? "Đừng bấm Đăng lần nữa. Đang đợi Facebook xác nhận kết quả."
+        ? message.autoClickPost ? "Đang tự đăng và chờ 5 giây để chuyển nhóm. Không kiểm tra xác nhận Facebook." : "Đừng bấm Đăng lần nữa. Đang đợi Facebook xác nhận kết quả."
         : "Mở tiện ích Groupflow để theo dõi tiến trình.";
   panel.append(title, info);
   document.body.append(panel);
@@ -541,7 +680,7 @@ function armUserPost(message: ComposerMessage): AdapterResult {
   if (matchingButtons().length !== 1)
     return { ok: false, clicked: false, message: "The Facebook Post button could not be identified. Review manually." };
   const readyButton = matchingButtons()[0];
-  if (!message.allowUnverifiedImages && (readyButton.matches(":disabled, [aria-disabled='true']") || dialog.querySelector("[role='progressbar'],[aria-busy='true']"))) return { ok: false, clicked: false, reason: "POST_BUTTON_DISABLED", message: "Finish uploading images before reviewing the post." };
+  if (readyButton.matches(":disabled, [aria-disabled='true']") || dialog.querySelector("[role='progressbar'],[aria-busy='true']")) return { ok: false, clicked: false, reason: "POST_BUTTON_DISABLED", message: "Finish uploading images before reviewing the post." };
   postWatcher?.detach();
   let submitted = false;
   const onClick = (event: MouseEvent) => {
@@ -600,17 +739,40 @@ chrome.runtime.onMessage.addListener((message: ComposerMessage, _sender, sendRes
   if (message.type === "CANCEL_JOB" && message.jobId) {
     cancelledJobs.add(message.jobId);
     jobGenerations.set(message.jobId, (jobGenerations.get(message.jobId) ?? 0) + 1);
-    uploadResults.delete(message.jobId);
-    uploadedFiles.delete(message.jobId);
-    uploadScopes.delete(message.jobId);
-    uploadAttempts.delete(message.jobId);
-    verifiedPreviews.delete(message.jobId);
+    // Cancellation preserves the upload tombstone to prevent reattachment.
     if (preparedJob?.id === message.jobId) preparedJob = undefined;
     if (postWatcher?.jobId === message.jobId) { postWatcher.detach(); postWatcher = undefined; }
     sendResponse({ ok: true }); return;
   }
   if (message.type !== "PREPARE_CAPTION" && message.type !== "PUBLISH_POST") return;
-  void handle(message).then(sendResponse).catch(() => sendResponse({ ok: false, clicked: message.jobId ? attemptedJobs.has(message.jobId) : false, message: "The Facebook action could not be completed. Check Facebook before trying again." }));
+  const key = message.jobId ?? "invalid-job";
+  if (requestLocks.has(key)) { const clicked = attemptedJobs.has(key); sendResponse({ ok: false, clicked, reason: clicked ? "ALREADY_SUBMITTED" : "PREPARATION_IN_PROGRESS" }); return; }
+  requestLocks.add(key);
+  const observeEarlyPost = (event: MouseEvent) => {
+    if (message.type !== "PREPARE_CAPTION" || !message.jobId || !event.isTrusted || cancelledJobs.has(key)) return;
+    if (!message.expectedGroupUrl || groupPath(location.href) !== groupPath(message.expectedGroupUrl)) return;
+    const target = event.target;
+    const button = target instanceof Element ? target.closest<HTMLElement>("button,[role='button']") : undefined;
+    const scope = openComposerEditor()?.closest("[role='dialog']");
+    if (!button || !scope?.contains(button) || !/^(post|publish|đăng|đăng bài)$/i.test(labelOf(button)) || button.matches(":disabled,[aria-disabled='true']") || scope.querySelector("[role='progressbar'],[aria-busy='true']")) return;
+    if (attemptedJobs.has(key)) return;
+    attemptedJobs.add(key);
+    try { void chrome.runtime.sendMessage({ type: "PREPARATION_POST_CLICKED", jobId: key })?.catch(() => undefined); } catch { /* Preserve local click evidence if the worker is unavailable. */ }
+  };
+  document.addEventListener("click", observeEarlyPost, true);
+  void handle(message).then(result => {
+    const scope = message.jobId ? uploadScopes.get(message.jobId) : undefined;
+    const evidence = uploadEvidence.get(key);
+    const button = scope ? [...scope.querySelectorAll<HTMLElement>("button,[role='button']")].find(element => visible(element) && /^(post|publish|đăng|đăng bài)$/i.test(labelOf(element))) : undefined;
+    sendResponse({ ...result, diagnostics: {
+      jobId: message.jobId, phase: message.type, expectedAttachmentCount: message.attachments?.length ?? 0,
+      observedPreviewCount: evidence?.observed ?? 0, verifiedAttachmentCount: evidence?.verified ?? 0, uploadDispatched: uploadAttempts.has(key),
+      verificationMethod: message.skipContentVerification ? "not-checked-user-requested" : evidence?.methods.size ? [...evidence.methods].join(",") : "unverified",
+      localToCdn: Boolean(evidence?.localToCdn || [...(verifiedPreviews.get(key)?.values() ?? [])].some(source => /^https:/.test(source))),
+      processing: Boolean(scope?.querySelector("[role='progressbar'],[aria-busy='true']")),
+      postButtonReady: Boolean(button && !button.matches(":disabled,[aria-disabled='true']")), reason: result.reason,
+    } });
+  }).catch(() => sendResponse({ ok: false, clicked: message.jobId ? attemptedJobs.has(message.jobId) : false, message: "The Facebook action could not be completed. Check Facebook before trying again." })).finally(() => { document.removeEventListener("click", observeEarlyPost, true); requestLocks.delete(key); });
   return true;
 });
 

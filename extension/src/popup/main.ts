@@ -90,7 +90,7 @@ function renderAutomatic() {
   byId<HTMLButtonElement>("autoStart").textContent = t(autoClickPost ? "Start automatic posting" : "Start preparing posts");
   byId<HTMLInputElement>("autoClickPost").checked = autoClickPost;
   byId<HTMLInputElement>("autoClickPost").disabled = sending || Boolean(currentAutomatic?.enabled) || Boolean(currentJob?.publishAttempted);
-  byId<HTMLElement>("autoHelp").textContent = t(autoClickPost ? "On: posts are published automatically, then the next scheduled group opens." : "Off: review each prepared post and click Post on Facebook.");
+  byId<HTMLElement>("autoHelp").textContent = t(autoClickPost ? "On: waits 5 seconds, clicks Post without checks, then waits 5 seconds before the next group." : "Off: review each prepared post and click Post on Facebook.");
   const run = currentAutomatic;
   const running = Boolean(run?.enabled);
   const paused = Boolean(run && !run.enabled && run.phase === "PAUSED");
@@ -124,11 +124,11 @@ function renderAutomatic() {
     ? run.phase === "OPENING" ? "Opening Facebook Group"
       : run.phase === "PREPARING" ? "Preparing the post"
         : run.phase === "AWAITING_USER" ? "Click Post on Facebook"
-          : run.phase === "VERIFYING" ? "Checking Facebook confirmation"
+          : run.phase === "VERIFYING" ? run.autoClickPost ? "Waiting 5 seconds before the next group" : "Checking Facebook confirmation"
             : "Waiting for scheduled post"
     : run.status === "Automatic posting completed." ? "Posting completed" : "Posting stopped";
   byId<HTMLElement>("autoStatusTitle").textContent = t(title);
-  const details = run ? [run.groupName, run.error || run.status, `${t("Prepared")}: ${run.attempts}`].filter(Boolean).map((value) => t(String(value))).join(" · ") : t("Choose a campaign and press Start posting.");
+  const details = run ? [run.groupName, run.error || run.status, `${t("Prepared jobs")}: ${run.attempts}`].filter(Boolean).map((value) => t(String(value))).join(" · ") : t("Choose a campaign and press Start posting.");
   byId<HTMLElement>("automaticStatus").textContent = details;
   byId<HTMLElement>("debugErrorCode").textContent = run?.errorCode ?? "";
   const step = running ? run!.phase === "OPENING" ? 1 : run!.phase === "PREPARING" ? 2 :

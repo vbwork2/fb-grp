@@ -109,3 +109,14 @@ it("automatic click evidence stays audited and prevents release", async () => {
   expect((await POST(request({ claimToken, action: "release" }), context())).status).toBe(409);
   expect((await db.select().from(queueItems))[0].status).toBe("AWAITING_CONFIRMATION");
 });
+
+it("unverified automatic completion requires recorded automatic click evidence", async () => {
+  const { POST } = await import("../src/app/api/extension/jobs/[id]/posted/route");
+  expect((await POST(request({ claimToken, confirmationSource: "automatic_unverified" }), context())).status).toBe(404);
+  await db.insert(auditLogs).values({ userId: state.device.userId, workspaceId: state.device.workspaceId, action: "QUEUE_ITEM_USER_CLICKED", resourceType: "queue_item", resourceId: jobId, metadataJson: { clickSource: "automatic" } });
+  expect((await POST(request({ claimToken, confirmationSource: "automatic_unverified", notes: "Verified success" }), context())).status).toBe(200);
+  expect((await db.select().from(queueItems))[0]).toMatchObject({ status: "POSTED", errorCode: "POST_OUTCOME_UNVERIFIED", claimToken: null });
+  expect((await db.select().from(postHistory))[0]).toMatchObject({ postedAt: null, notes: expect.stringContaining("unverified") });
+  expect((await db.select().from(auditLogs)).filter(row => row.resourceId === jobId).some(row => row.action === "QUEUE_ITEM_SUBMITTED_UNVERIFIED")).toBe(true);
+  expect((await POST(request({ claimToken, confirmationSource: "automatic_unverified" }), context())).status).toBe(404);
+});

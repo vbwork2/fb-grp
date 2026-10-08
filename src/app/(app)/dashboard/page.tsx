@@ -281,10 +281,10 @@ export default async function DashboardPage() {
                     <td>
                       <span
                         className={`badge ${
-                          history.status === "POSTED" ? "green" : history.status === "FAILED" ? "red" : "amber"
+                          history.status === "POSTED" && !history.notes?.startsWith("Automatic submission (unverified).") ? "green" : history.status === "FAILED" ? "red" : "amber"
                         }`}
                       >
-                        <T>{history.status}</T>
+                        <T>{history.notes?.startsWith("Automatic submission (unverified).") ? "Submitted (unverified)" : history.status}</T>
                       </span>
                     </td>
                     <td className="text-slate-500 text-xs">
