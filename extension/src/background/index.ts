@@ -39,10 +39,27 @@ function sameGroup(actual: string | undefined, expected: string): boolean {
   } catch { return false; }
 }
 
-chrome.runtime.onMessage.addListener((message: { type: string; apiUrl?: string; code?: string; mediaId?: string; jobId?: string; mediaConfirmed?: boolean; campaignId?: string }, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message: { type: string; apiUrl?: string; code?: string; mediaId?: string; jobId?: string; mediaConfirmed?: boolean; campaignId?: string; stage?: string }, _sender, sendResponse) => {
   void (async () => {
     try {
       if (message.type === "AUTO_CAMPAIGNS") { sendResponse({ ok: true, ...(await api("/api/extension/campaigns") as object) }); return; }
+      if (message.type === "AUTO_STAGE") {
+        const run = await automaticState();
+        const job = (await settings()).job;
+        const statusByStage: Record<string, string> = {
+          OPEN_COMPOSER: "Opening the Facebook post composer.",
+          FILL_CAPTION: "Filling in the caption.",
+          ATTACH_IMAGES: "Attaching images to the post.",
+          VERIFY_UPLOAD: "Waiting for images to finish uploading.",
+          PREPARED: "Caption and images are ready to publish."
+        };
+        const status = statusByStage[message.stage ?? ""];
+        if (run?.enabled && run.phase === "PREPARING" && job?.id === message.jobId && status) {
+          await updateAutomatic(run, { status });
+        }
+        sendResponse({ ok: true });
+        return;
+      }
       if (message.type === "AUTO_START") { await startAutomatic(message.campaignId); sendResponse({ ok: true }); return; }
       if (message.type === "AUTO_STOP") { await stopAutomatic(); sendResponse({ ok: true }); return; }
       const activeRun = (await chrome.storage.local.get("automatic")).automatic as AutomaticRun | undefined;
@@ -200,7 +217,12 @@ async function runAutomatic() {
     await updateAutomatic(run, { phase: "OPENING", groupName: job.group.name, status: "Opening the next group." });
     let tab: chrome.tabs.Tab | undefined;
     if (run.tabId) {
-      tab = await chrome.tabs.update(run.tabId, { url: job.group.url, active: true }).catch(() => chrome.tabs.create({ url: job.group.url, active: true }));
+      const existing = await chrome.tabs.get(run.tabId).catch(() => undefined);
+      // If the user already opened the Facebook composer while reviewing an
+      // error, resuming must not reload the group and discard their progress.
+      tab = existing && sameGroup(existing.url, job.group.url)
+        ? await chrome.tabs.update(run.tabId, { active: true })
+        : await chrome.tabs.update(run.tabId, { url: job.group.url, active: true }).catch(() => chrome.tabs.create({ url: job.group.url, active: true }));
     } else tab = await chrome.tabs.create({ url: job.group.url, active: true });
     if (!tab?.id) throw new Error("The Facebook Group could not be opened.");
     await updateAutomatic(run, { tabId: tab.id });
