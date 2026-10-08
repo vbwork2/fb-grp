@@ -1,4 +1,10 @@
 export const vietnamese: Record<string, string> = {
+  "Images (optional)": "Ảnh (không bắt buộc)",
+  "Choose JPG, PNG, or WebP images. They will be uploaded when you save content.": "Chọn ảnh JPG, PNG hoặc WebP. Ảnh sẽ được tải lên khi bạn lưu nội dung.",
+  "Content and images saved.": "Đã lưu nội dung và ảnh.",
+  "Content saved. Some images could not be uploaded. Save again to retry the remaining images.": "Đã lưu nội dung nhưng một số ảnh chưa tải lên được. Bấm lưu lại để thử tải các ảnh còn lại.",
+  "Show content variants": "Hiện các phiên bản nội dung",
+  "Hide content variants": "Ẩn các phiên bản nội dung",
   "Opening the Facebook post composer.": "Đang mở cửa sổ viết bài Facebook.",
   "Filling in the caption.": "Đang nhập nội dung bài viết.",
   "Attaching images to the post.": "Đang đính kèm ảnh.",

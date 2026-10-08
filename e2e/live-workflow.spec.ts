@@ -114,6 +114,36 @@ test("authenticated workflows, tenant isolation, device claims, and password res
       await page.goto("/content");
       await expect(page.getByText("Updated caption for manual review", { exact: true })).toBeVisible();
       await expect(page.getByRole("button", { name: "Lưu nội dung", exact: true })).toBeVisible();
+      const originalArticle = page.locator("article").filter({ hasText: "Updated caption for manual review" });
+      await expect(originalArticle.getByRole("button", { name: "Thêm phiên bản", exact: true })).toHaveCount(0);
+      await originalArticle.getByRole("button", { name: "Hiện các phiên bản nội dung", exact: true }).click();
+      await expect(originalArticle.getByRole("button", { name: "Thêm phiên bản", exact: true })).toBeVisible();
+      await originalArticle.getByRole("button", { name: "Ẩn các phiên bản nội dung", exact: true }).click();
+      await expect(originalArticle.getByRole("button", { name: "Thêm phiên bản", exact: true })).toHaveCount(0);
+      const browserContentName = `Image form acceptance ${runId}`;
+      await page.locator("#contentName").fill(browserContentName);
+      await page.locator("#contentBody").fill("Caption with images");
+      await page.locator("#contentImages").setInputFiles([
+        { name: "first.png", mimeType: "image/png", buffer: png },
+        { name: "second.png", mimeType: "image/png", buffer: png },
+      ]);
+      let uploadRequests = 0;
+      await page.route("**/api/media", async (route) => {
+        if (route.request().method() === "POST" && ++uploadRequests === 2) {
+          await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ data: null, error: { message: "Unable to upload image." } }) });
+        } else await route.continue();
+      });
+      await page.getByRole("button", { name: "Lưu nội dung", exact: true }).click();
+      await expect(page.locator("p.error[role=alert]")).toHaveText("Không thể tải ảnh lên.");
+      const [browserContent] = await sql`select id from contents where workspace_id=${workspaceId} and name=${browserContentName}`;
+      expect(await sql`select id from media where content_id=${browserContent.id}`).toHaveLength(1);
+      await page.unroute("**/api/media");
+      await page.getByRole("button", { name: "Lưu nội dung", exact: true }).click();
+      await expect(page.getByRole("status")).toHaveText("Đã lưu nội dung và ảnh.");
+      expect(await sql`select id from contents where workspace_id=${workspaceId} and name=${browserContentName}`).toHaveLength(1);
+      expect(await sql`select id from media where content_id=${browserContent.id}`).toHaveLength(2);
+      await expect(page.locator("#contentName")).toHaveValue("");
+      await data(await actorA.delete(`/api/content/${browserContent.id}`));
       await page.goto("/queue");
       await expect(page.locator("select[name=status] option[value=PENDING]")).toHaveText("Đang chờ");
       await page.locator("select[name=status]").selectOption("PENDING");

@@ -96,12 +96,57 @@ export function ContentPanel({ initialContents }: { initialContents: Content[] }
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [editingContent, setEditingContent] = useState<Content | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [pendingContentId, setPendingContentId] = useState<string | null>(null);
+  const [expandedVariants, setExpandedVariants] = useState<string[]>([]);
+  const maxMegabytes = process.env.NODE_ENV === "production" ? 4 : 10;
+
+  function validateFiles(selected: File[]) {
+    if (selected.some((file) => !["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size === 0)) {
+      throw new Error("Upload a valid JPG, PNG, or WebP image.");
+    }
+    if (selected.some((file) => file.size > maxMegabytes * 1024 * 1024)) {
+      throw new Error(`Choose an image up to ${maxMegabytes} MB.`);
+    }
+  }
+  async function attachImage(contentId: string, file: File) {
+    const form = new FormData(); form.set("file", file); form.set("contentId", contentId);
+    const response = await fetch("/api/media", { method: "POST", body: form });
+    const result = await response.json() as ApiResult<MediaItem>;
+    if (!response.ok || !result.data) throw new Error(result.error?.message ?? "Unable to upload image.");
+    const image = result.data;
+    setUploads((current) => ({ ...current, [contentId]: [...(current[contentId] ?? []), image] }));
+  }
   async function add(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setError(""); setSuccess("");
+    event.preventDefault();
+    if (busy) return;
+    setError(""); setSuccess("");
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
-    try { const item = await request<Content>("/api/content", Object.fromEntries(form.entries())); setItems((current) => [item, ...current]); formElement.reset(); setSuccess("Content saved."); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to save content."); }
+    const values = { name: form.get("name"), body: form.get("body"), linkUrl: form.get("linkUrl") };
+    setBusy(true);
+    let contentId = pendingContentId;
+    try {
+      validateFiles(files);
+      const item = contentId
+        ? await request<Content>(`/api/content/${contentId}`, values, "PATCH")
+        : await request<Content>("/api/content", values);
+      contentId = item.id;
+      setPendingContentId(item.id);
+      setItems((current) => [item, ...current.filter((entry) => entry.id !== item.id)]);
+      // Keep the saved content and remaining files when an upload fails.
+      for (const file of files) {
+        await attachImage(item.id, file);
+        setFiles((current) => current.filter((entry) => entry !== file));
+      }
+      formElement.reset(); setFiles([]); setPendingContentId(null);
+      setSuccess(files.length ? "Content and images saved." : "Content saved.");
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "Unable to save content.";
+      setError(message);
+      if (contentId) setSuccess("Content saved. Some images could not be uploaded. Save again to retry the remaining images.");
+    } finally { setBusy(false); }
   }
   async function remove(id: string) {
     try { await request(`/api/content/${id}`, undefined, "DELETE"); setItems((current) => current.filter((item) => item.id !== id)); }
@@ -117,19 +162,59 @@ export function ContentPanel({ initialContents }: { initialContents: Content[] }
     const inputElement = event.currentTarget;
     const file = inputElement.files?.[0]; if (!file) return;
     setError(""); setSuccess("");
-    const maxMegabytes = process.env.NODE_ENV === "production" ? 4 : 10;
-    if (file.size > maxMegabytes * 1024 * 1024) { setError(`Choose an image up to ${maxMegabytes} MB.`); inputElement.value = ""; return; }
-    const form = new FormData(); form.set("file", file); form.set("contentId", contentId);
-    try {
-      const response = await fetch("/api/media", { method: "POST", body: form });
-      const result = await response.json() as ApiResult<MediaItem>;
-      if (!response.ok || !result.data) throw new Error(result.error?.message ?? "Unable to upload image.");
-      setUploads((current) => ({ ...current, [contentId]: [...(current[contentId] ?? []), result.data!] }));
-      setSuccess("Image uploaded and attached to this content.");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to upload image."); }
+    try { validateFiles([file]); await attachImage(contentId, file); setSuccess("Image uploaded and attached to this content."); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to upload image."); }
     finally { inputElement.value = ""; }
   }
-  return <>{editingContent && <ContentEditor content={editingContent} onClose={() => setEditingContent(null)} onSaved={(updated) => { setItems((current) => current.map((item) => item.id === updated.id ? updated : item)); setEditingContent(null); }} />}<div className="panel"><div className="panel-head"><h2><T>{"Create reusable content"}</T></h2></div><form className="form" style={{ padding: 20 }} onSubmit={add}><div className="field"><label htmlFor="contentName"><T>{"Content name"}</T></label><input id="contentName" name="name" required maxLength={160} /></div><div className="field"><label htmlFor="contentBody"><T>{"Caption"}</T></label><LocalizedTextarea id="contentBody" name="body" required maxLength={10000} placeholder="Write the caption you will review before posting." /></div><div className="field"><label htmlFor="contentLink"><T>{"Link (optional)"}</T></label><input id="contentLink" name="linkUrl" type="url" /></div><Feedback error={error} success={success} /><button className="button primary" style={{ justifySelf: "start" }}><T>{"Save content"}</T></button></form></div><div className="panel"><div className="panel-head"><h2><T>{"Saved content"}</T></h2><span className="muted">{items.length}<T>{" items"}</T></span></div>{items.length === 0 ? <div className="empty"><strong><T>{"No saved content yet."}</T></strong><T>{"Create reusable captions for your campaigns."}</T></div> : items.map((item) => <article key={item.id} style={{ padding: 20, borderBottom: "1px solid var(--line)" }}><div className="row"><strong>{item.name}</strong><div className="buttons"><button className="button small" onClick={() => setEditingContent(item)}><T>{"Edit"}</T></button><button className="button small" onClick={() => void duplicate(item)}><T>{"Duplicate"}</T></button><button className="button small danger" onClick={() => void remove(item.id)}><T>{"Delete"}</T></button></div></div><p className="muted" style={{ whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{item.body}</p>{item.linkUrl && <a href={item.linkUrl} className="muted">{item.linkUrl}</a>}<div style={{ marginTop: 13 }}><label className="button small" htmlFor={`image-${item.id}`}><T>{"Upload image"}</T></label><input id={`image-${item.id}`} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => void uploadImage(item.id, event)} style={{ display: "none" }} />{(uploads[item.id] ?? []).map((image) => <a key={image.id} href={`/api/media/${image.id}`} className="muted" style={{ marginLeft: 10 }}>{image.originalFilename} ({Math.ceil(image.sizeBytes / 1024)}<T>{" KB)"}</T></a>)}</div><VariantEditor contentId={item.id} /></article>)}</div></>;
+  return <>
+    {editingContent && <ContentEditor content={editingContent} onClose={() => setEditingContent(null)} onSaved={(updated) => { setItems((current) => current.map((item) => item.id === updated.id ? updated : item)); setEditingContent(null); }} />}
+    <div className="panel">
+      <div className="panel-head"><h2><T>{"Create reusable content"}</T></h2></div>
+      <form className="form" style={{ padding: 20 }} onSubmit={add}>
+        <fieldset disabled={busy} className="form" style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+          <div className="field"><label htmlFor="contentName"><T>{"Content name"}</T></label><input id="contentName" name="name" required maxLength={160} /></div>
+          <div className="field"><label htmlFor="contentBody"><T>{"Caption"}</T></label><LocalizedTextarea id="contentBody" name="body" required maxLength={10000} placeholder="Write the caption you will review before posting." /></div>
+          <div className="field"><label htmlFor="contentLink"><T>{"Link (optional)"}</T></label><input id="contentLink" name="linkUrl" type="url" /></div>
+          <div className="field">
+            <label htmlFor="contentImages"><T>{"Images (optional)"}</T></label>
+            <input id="contentImages" type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => {
+              const selected = [...(event.currentTarget.files ?? [])];
+              try { validateFiles(selected); setFiles(selected); setError(""); }
+              catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to upload image."); setFiles([]); event.currentTarget.value = ""; }
+            }} />
+            <p className="muted"><T>{"Choose JPG, PNG, or WebP images. They will be uploaded when you save content."}</T></p>
+            {files.length > 0 && <ul className="muted">{files.map((file, index) => <li key={index}>{file.name} ({Math.ceil(file.size / 1024)} KB)</li>)}</ul>}
+          </div>
+          <button className="button primary" style={{ justifySelf: "start" }}><T>{busy ? "Saving…" : "Save content"}</T></button>
+        </fieldset>
+        <Feedback error={error} success={success} />
+      </form>
+    </div>
+    <div className="panel">
+      <div className="panel-head"><h2><T>{"Saved content"}</T></h2><span className="muted">{items.length}<T>{" items"}</T></span></div>
+      {items.length === 0 ? <div className="empty"><strong><T>{"No saved content yet."}</T></strong><T>{"Create reusable captions for your campaigns."}</T></div> : items.map((item) => {
+        const expanded = expandedVariants.includes(item.id);
+        return <article key={item.id} style={{ padding: 20, borderBottom: "1px solid var(--line)" }}>
+          <div className="row"><strong>{item.name}</strong><div className="buttons">
+            <button className="button small" disabled={busy || pendingContentId === item.id} onClick={() => setEditingContent(item)}><T>{"Edit"}</T></button>
+            <button className="button small" onClick={() => void duplicate(item)}><T>{"Duplicate"}</T></button>
+            <button className="button small danger" disabled={busy || pendingContentId === item.id} onClick={() => void remove(item.id)}><T>{"Delete"}</T></button>
+          </div></div>
+          <p className="muted" style={{ whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{item.body}</p>
+          {item.linkUrl && <a href={item.linkUrl} className="muted">{item.linkUrl}</a>}
+          <div style={{ marginTop: 13 }}>
+            <label className="button small" htmlFor={`image-${item.id}`}><T>{"Upload image"}</T></label>
+            <input id={`image-${item.id}`} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => void uploadImage(item.id, event)} style={{ display: "none" }} />
+            {(uploads[item.id] ?? []).map((image) => <a key={image.id} href={`/api/media/${image.id}`} className="muted" style={{ marginLeft: 10 }}>{image.originalFilename} ({Math.ceil(image.sizeBytes / 1024)}<T>{" KB)"}</T></a>)}
+          </div>
+          <div style={{ marginTop: 13 }}>
+            <button type="button" className="button small" aria-expanded={expanded} aria-controls={`variants-${item.id}`} onClick={() => setExpandedVariants((current) => expanded ? current.filter((id) => id !== item.id) : [...current, item.id])}><T>{expanded ? "Hide content variants" : "Show content variants"}</T></button>
+            {expanded && <div id={`variants-${item.id}`}><VariantEditor contentId={item.id} /></div>}
+          </div>
+        </article>;
+      })}
+    </div>
+  </>;
 }
 
 function ContentEditor({ content, onClose, onSaved }: { content: Content; onClose: () => void; onSaved: (content: Content) => void }) {
