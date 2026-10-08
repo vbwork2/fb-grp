@@ -217,6 +217,8 @@ test("authenticated workflows, tenant isolation, device claims, and password res
         await popup.locator("#apiUrl").fill("http://localhost:3000");
         await popup.locator("#code").fill(code.code);
         await popup.locator("#pair").click();
+        await popup.locator("#language").selectOption("en");
+        await popup.locator("#manualDetails").evaluate((details: HTMLDetailsElement) => { details.open = true; });
         await expect(popup.locator("#status")).toHaveText("Device connected.");
         expect(await worker.evaluate(async () => Boolean((await chrome.storage.local.get("deviceToken")).deviceToken))).toBe(true);
         const groupPagePromise = browser.waitForEvent("page");
@@ -231,6 +233,7 @@ test("authenticated workflows, tenant isolation, device claims, and password res
         await expect(popup.locator("#posted")).toHaveText("Tôi đã đăng bài");
         await expect(popup.locator("#caption")).toContainText("Updated caption for manual review");
         await popup.reload();
+        await popup.locator("#manualDetails").evaluate((details: HTMLDetailsElement) => { details.open = true; });
         await expect(popup.locator("#language")).toHaveValue("vi");
         await expect(popup.locator("#copy")).toHaveText("Sao chép nội dung");
         await expect(popup.locator("#caption")).toContainText("Updated caption for manual review");
