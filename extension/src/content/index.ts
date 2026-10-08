@@ -94,21 +94,69 @@ async function composer(message: ComposerMessage): Promise<HTMLElement | undefin
   return waitFor(openComposerEditor, COMPOSER_TIMEOUT_MS);
 }
 
-function fill(editor: HTMLElement, message: ComposerMessage) {
-  const text = [message.caption ?? "", message.linkUrl ?? ""].filter(Boolean).join("\n\n");
+// Facebook uses a rich-text/contenteditable composer (often Lexical).
+// Inserting a full string with "\n" can put raw newlines in a text node,
+// which Facebook displays as one continuous paragraph. Insert explicit
+// line breaks so they survive as visible lines in the composer.
+function captionText(message: ComposerMessage): string {
+  return [message.caption ?? "", message.linkUrl ?? ""]
+    .filter(Boolean).join("\n\n").replace(/\r\n?/g, "\n").replace(/[\u2028\u2029]/g, "\n");
+}
+
+function compareCaption(value: string): string {
+  return value.replace(/\r\n?/g, "\n")
+    .replace(/[\u200b\ufeff]/gi, "")
+    .split("\n").map((line) => line.trimEnd()).join("\n")
+    .replace(/\n+$/, "");
+}
+
+function editorText(editor: HTMLElement): string {
+  if (editor instanceof HTMLTextAreaElement) return editor.value;
+  // Lexical usually renders one <p> for each line. innerText can add a
+  // second newline between <p> blocks; join those blocks ourselves.
+  const children = [...editor.children];
+  if (children.length && children.every((child) => /^(P|DIV)$/i.test(child.tagName))) {
+    return children.map((child) => (child as HTMLElement).innerText.replace(/\n+$/, "")).join("\n");
+  }
+  return editor.innerText;
+}
+
+function captionMatches(editor: HTMLElement, text: string): boolean {
+  return compareCaption(editorText(editor)) === compareCaption(text);
+}
+
+async function fill(editor: HTMLElement, message: ComposerMessage): Promise<boolean> {
+  const text = captionText(message);
   editor.focus();
   if (editor instanceof HTMLTextAreaElement) {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(editor, text);
     editor.dispatchEvent(new Event("input", { bubbles: true }));
   } else {
     const selection = window.getSelection();
-    selection?.selectAllChildren(editor);
-    if (!document.execCommand("insertText", false, text)) {
-      editor.textContent = text;
-      editor.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
+    if (!selection) return false;
+    selection.selectAllChildren(editor);
+    const lines = text.split("\n");
+    // Unlike one insertText containing literal \n, insertLineBreak inserts
+    // actual <br> nodes / Lexical line breaks (like Shift+Enter).
+    for (let i = 0; i < lines.length; i++) {
+      if (cancelled(message)) return false;
+      if (i > 0 && !document.execCommand("insertLineBreak", false)) return false;
+      if (lines[i] && !document.execCommand("insertText", false, lines[i])) return false;
     }
   }
-  if (message.jobId) preparedJob = { id: message.jobId, editor };
+  // Give controlled React/Lexical editors a moment to reconcile DOM changes.
+  await new Promise((resolve) => window.setTimeout(resolve, 120));
+  const valid = captionMatches(editor, text);
+  if (valid && message.jobId) preparedJob = { id: message.jobId, editor };
+  return valid;
+}
+
+function lostCaptionLineBreaks(editor: HTMLElement, message: ComposerMessage): boolean {
+  const intended = compareCaption(captionText(message));
+  const rendered = compareCaption(editorText(editor));
+  return intended.includes("\n")
+    && intended.replace(/\n/g, "") === rendered.replace(/\n/g, "")
+    && intended !== rendered;
 }
 
 async function waitFor<T>(read: () => T | undefined, milliseconds: number): Promise<T | undefined> {
@@ -219,7 +267,9 @@ async function handle(message: ComposerMessage): Promise<AdapterResult> {
   if (publish && !scope) return { ok: false, clicked: false, reason: "POST_BUTTON_NOT_FOUND", message: "Open the Facebook post dialog before publishing." };
   if (!publish || preparedJob?.id !== message.jobId || preparedJob?.editor !== editor) {
     reportStage(message, "FILL_CAPTION");
-    fill(editor, message);
+    if (!(await fill(editor, message))) {
+      return { ok: false, clicked: false, reason: "CAPTION_FORMAT_INVALID", message: "Facebook could not preserve the caption formatting. Review the text and line breaks before publishing." };
+    }
   }
   if (message.attachments?.length) {
     reportStage(message, "ATTACH_IMAGES");
@@ -229,8 +279,9 @@ async function handle(message: ComposerMessage): Promise<AdapterResult> {
     reportStage(message, "PREPARED");
     return { ok: true, clicked: false };
   }
-  const text = editor instanceof HTMLTextAreaElement ? editor.value : editor.textContent;
+  const text = editorText(editor);
   if (!text?.trim()) return { ok: false, clicked: false, reason: "EMPTY_CAPTION", message: "The Facebook caption is empty. Prepare the caption before publishing." };
+  if (lostCaptionLineBreaks(editor, message)) return { ok: false, clicked: false, reason: "CAPTION_FORMAT_INVALID", message: "Facebook could not preserve the caption formatting. Review the text and line breaks before publishing." };
   const buttons = [...scope!.querySelectorAll<HTMLElement>("button, [role='button']")].filter((element) => visible(element) && /^(post|publish|đăng|đăng bài)$/i.test((element.getAttribute("aria-label") ?? element.innerText).trim()));
   if (buttons.length !== 1) return { ok: false, clicked: false, reason: "POST_BUTTON_NOT_FOUND", message: "The Facebook Post button could not be identified. Publish directly on Facebook." };
   const button = buttons[0];
