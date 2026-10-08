@@ -105,7 +105,7 @@ function captionText(message: ComposerMessage): string {
 
 function compareCaption(value: string): string {
   return value.replace(/\r\n?/g, "\n")
-    .replace(/[\u200b\ufeff]/gi, "")
+    .replace(/[\u200b\ufeff]/gi, "").replace(/\u00a0/g, " ")
     .split("\n").map((line) => line.trimEnd()).join("\n")
     .replace(/\n+$/, "");
 }
@@ -140,7 +140,7 @@ async function fill(editor: HTMLElement, message: ComposerMessage): Promise<bool
     // actual <br> nodes / Lexical line breaks (like Shift+Enter).
     for (let i = 0; i < lines.length; i++) {
       if (cancelled(message)) return false;
-      if (i > 0 && !document.execCommand("insertLineBreak", false)) return false;
+      if (i > 0 && !document.execCommand("insertLineBreak", false) && !document.execCommand("insertParagraph", false)) return false;
       if (lines[i] && !document.execCommand("insertText", false, lines[i])) return false;
     }
   }
