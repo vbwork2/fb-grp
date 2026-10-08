@@ -21,8 +21,12 @@ end
 E->>F: Prepare caption and verify image previews
 E->>W: Reserve submission (AWAITING_CONFIRMATION)
 E->>F: Install trusted-click watcher
+alt Automatically click Post enabled
+E->>F: Click verified Post button once
+else Manual Post mode
 U->>F: Review and click Post directly on Facebook
-E->>W: Record actual user click separately from reservation
+end
+E->>W: Record click source separately from reservation
 alt Fresh publication confirmation for this group
 E->>W: Confirm published (ui_confirmed)
 W->>DB: Save POSTED/history once
@@ -45,7 +49,7 @@ stateDiagram-v2
     OPENED --> FAILED: confirmed preparation failure
     OPENED --> SKIPPED: explicit pre-submission skip
     OPENED --> AWAITING_CONFIRMATION: reserve before watcher
-    AWAITING_CONFIRMATION --> AWAITING_CONFIRMATION: user click / unknown / approval
+    AWAITING_CONFIRMATION --> AWAITING_CONFIRMATION: user or automatic click / unknown / approval
     AWAITING_CONFIRMATION --> POSTED: reliable UI or explicit user confirmation
     FAILED --> READY: reset failed groups
 ```
@@ -76,3 +80,7 @@ Image deletion: open Details and click Delete image below a thumbnail. Confirm t
 Inline editing: click Edit within an item's Details. The edit form appears in that same card; saving updates its name, caption and link without leaving the page. A failed save retains the draft. Close discards unsaved edits. Uploading/deleting images and saving content disable conflicting actions while requests are active.
 
 Management editors open next to their context: the Groups page shows its edit form in a full-width table row immediately below the selected group. Campaign settings contain their campaign editor, and editing a campaign group opens its form inside that group's row. The new-group form opens directly below Add a Facebook Group. Opening another group's editor resets the inputs to that group; saving refreshes the displayed row.
+
+## Optional automatic Post
+
+Automatically click Post defaults off and must be enabled explicitly in the popup before starting a run. The setting persists, including when the popup closes, while each run keeps its selected mode. Changing modes is disabled during a run or an unresolved submission. Trusted human clicks remain monitored even in automatic mode. An automatic click is audited separately via clickSource metadata, and only verified publication proceeds to the next due group. Unknown, approval, transport loss and worker restart preserve the reserved job for review. No uncertain result is retried automatically.

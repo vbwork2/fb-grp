@@ -2,7 +2,7 @@
 
 Groupflow is a multi-user Facebook Group posting assistant. It organizes reusable captions, images and campaign queues, then uses a paired Chrome Extension to prepare one Facebook Group post at a time across campaigns without a fixed group-count cap.
 
-The application never asks for Facebook credentials and never stores Facebook passwords, cookies, browser sessions, 2FA codes, or CAPTCHA answers. Assisted campaigns fill due post captions and attach images, then wait for the user to click Post directly on Facebook. Confirmed successes automatically advance the queue; approval-required or unknown results pause for review. See [extension setup](docs/extension.md).
+The application never asks for Facebook credentials and never stores Facebook passwords, cookies, browser sessions, 2FA codes, or CAPTCHA answers. Campaigns fill due post captions and attach images. By default you click Post directly on Facebook; the explicit Automatically click Post switch enables automatic submission. Confirmed successes automatically advance the queue; approval-required or unknown results pause for review. See [extension setup](docs/extension.md).
 
 ## Architecture
 
@@ -56,7 +56,7 @@ Use the Language selector at the bottom right of any web page to choose English 
 
 The Chrome Extension has its own language selector at the top of the popup. Its choice persists in `chrome.storage.local`. Reload the unpacked extension after rebuilding to use the new popup.
 
-Campaign schedules determine when jobs become available. In assisted campaigns the extension prepares each post, then the user reviews and clicks Post directly on Facebook. Only a reliable publication confirmation advances the queue. Advanced manual controls remain available for recovery.
+Campaign schedules determine when jobs become available. With Automatically click Post off, you review and click Post; with it on, the extension clicks only after preparation is verified. Only a reliable publication confirmation advances the queue. Advanced manual controls remain available for recovery.
 
 ## Authentication setup
 

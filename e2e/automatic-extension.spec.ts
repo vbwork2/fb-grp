@@ -169,7 +169,7 @@ test(`assisted campaign with legacy preference ${legacyPreference} and explicit 
     await expect.poll(async () => { const current = await state(); if (current?.error) throw new Error(current.error); return current?.enabled; }, { timeout: 20_000 }).toBe(false);
     expect(reservations).toHaveLength(groupCount);
     expect(confirmed).toEqual(Array.from({ length: groupCount }, (_, index) => `/api/extension/jobs/job-${index + 1}/posted`));
-    await popup.screenshot({ path: `test-results/assisted-popup-${legacyPreference}.png` });
+    await popup.screenshot({ path: `docs/repair-evidence/post-mode-${autoEnabled ? "on" : "off"}-${legacyPreference}.png` });
     await groupPage.screenshot({ path: `test-results/assisted-composer-${legacyPreference}.png` });
     // A popup already open during failure must refresh the server's failed
     // count so the user can recover without closing and reopening it.

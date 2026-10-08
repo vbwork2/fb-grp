@@ -651,3 +651,87 @@ for (const wrongImage of [false, true]) {
     expect(await page.evaluate(() => (window as unknown as { finalPostClicks: number }).finalPostClicks)).toBe(0);
   });
 }
+
+test("browser-resized local preview matches the original image without reupload", async ({ page }) => {
+  await setup(page, '<div role="dialog"><div role="textbox" contenteditable="true"></div><input type="file" accept="image/png"><button class="post">Post</button></div>');
+  const dataUrl = await page.evaluate(() => {
+    const source = document.createElement("canvas"); source.width = 32; source.height = 24;
+    const context = source.getContext("2d")!;
+    const gradient = context.createLinearGradient(0, 0, 32, 24); gradient.addColorStop(0, "red"); gradient.addColorStop(1, "blue");
+    context.fillStyle = gradient; context.fillRect(0, 0, 32, 24);
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')!;
+    (window as unknown as { uploads: number }).uploads = 0;
+    input.onchange = async () => {
+      (window as unknown as { uploads: number }).uploads++;
+      const bitmap = await createImageBitmap(input.files![0]);
+      const resized = document.createElement("canvas"); resized.width = 8; resized.height = 6;
+      resized.getContext("2d")!.drawImage(bitmap, 0, 0, 8, 6); bitmap.close();
+      const image = document.createElement("img"); image.src = resized.toDataURL(); image.width = 32; image.height = 24;
+      document.querySelector('[role="dialog"]')!.append(image);
+    };
+    return source.toDataURL();
+  });
+  const payload = { type: "PREPARE_CAPTION", ...job, attachments: [{ id: "resized-image", filename: "gradient.png", mimeType: "image/png", dataUrl }] };
+  expect((await send(page, payload)).ok).toBe(true);
+  expect((await send(page, payload)).ok).toBe(true);
+  expect(await page.evaluate(() => (window as unknown as { uploads: number }).uploads)).toBe(1);
+});
+
+for (const manual of [false, true]) {
+  test('unverified images respect manual mode: ' + manual, async ({ page }) => {
+    await setup(page, '<div role="dialog"><div role="textbox" contenteditable="true"></div><input type="file" accept="image/*"><button class="post">Post</button></div>');
+    await page.evaluate(() => {
+      document.querySelector<HTMLInputElement>('input')!.onchange = () => {
+        const canvas = document.createElement('canvas'); canvas.width = 2; canvas.height = 2;
+        const context = canvas.getContext('2d')!; context.fillStyle = 'red'; context.fillRect(0, 0, 2, 2);
+        const image = document.createElement('img'); image.src = canvas.toDataURL(); image.width = 20; image.height = 20;
+        document.querySelector('[role=dialog]')!.append(image);
+      };
+    });
+    const attachments = [{ id: 'unverified-image', filename: 'pixel.png', mimeType: 'image/png', dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4AWJiYGBgAAAAAP//XRcpzQAAAAZJREFUAwAADwADJDd96QAAAABJRU5ErkJggg==' }];
+    const prepared = await send(page, { type: 'PREPARE_CAPTION', ...job, attachments, allowUnverifiedImages: manual });
+    expect(prepared.ok).toBe(manual);
+    if (manual) {
+      expect(prepared).toHaveProperty('warning');
+      expect(await send(page, { type: 'ARM_USER_POST', ...job, allowUnverifiedImages: true })).toMatchObject({ ok: true });
+    } else expect(prepared.reason).toBe('UPLOAD_PREVIEW_UNVERIFIED');
+    expect(await send(page, { type: 'PUBLISH_POST', ...job, attachments, allowUnverifiedImages: true })).toMatchObject({ ok: false, clicked: false });
+    expect(await page.evaluate(() => (window as unknown as { finalPostClicks: number }).finalPostClicks)).toBe(0);
+    await expect(page.locator('[role=dialog] img')).toHaveCount(1);
+    if (manual) {
+      await page.getByRole('button', { name: 'Post', exact: true }).click();
+      await expect.poll(() => page.evaluate(() => (window as unknown as { automaticEvents: { type: string }[] }).automaticEvents.some(event => event.type === 'USER_POST_CLICKED'))).toBe(true);
+    }
+  });
+}
+
+test('verified local preview survives replacement with a CDN source on the same image', async ({ page }) => {
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4AWJiYGBgAAAAAP//XRcpzQAAAAZJREFUAwAADwADJDd96QAAAABJRU5ErkJggg==';
+  await page.route('https://cdn.fixture.test/**', route => route.fulfill({ contentType: 'image/png', body: Buffer.from(png, 'base64') }));
+  await setup(page, '<div role="dialog"><div role="textbox" contenteditable="true"></div><input type="file" accept="image/*"><button class="post" disabled>Post</button></div>');
+  await page.evaluate(() => {
+    const input = document.querySelector<HTMLInputElement>('input')!;
+    input.onchange = () => {
+      const image = document.createElement('img'); const source = URL.createObjectURL(input.files![0]);
+      image.src = source; image.width = 20; image.height = 20; input.parentElement!.append(image);
+      setTimeout(() => { image.src = 'https://cdn.fixture.test/preview.png'; URL.revokeObjectURL(source); document.querySelector<HTMLButtonElement>('button')!.disabled = false; }, 100);
+    };
+  });
+  const attachments = [{ id: 'cdn-image', filename: 'pixel.png', mimeType: 'image/png', dataUrl: 'data:image/png;base64,' + png }];
+  expect(await send(page, { type: 'PREPARE_CAPTION', ...job, attachments })).toMatchObject({ ok: true });
+  await expect(page.locator('[role=dialog] img')).toHaveAttribute('src', 'https://cdn.fixture.test/preview.png');
+  expect(await send(page, { type: 'PUBLISH_POST', ...job, attachments })).toMatchObject({ ok: true, clicked: true });
+  expect(await page.evaluate(() => (window as unknown as { finalPostClicks: number }).finalPostClicks)).toBe(1);
+});
+
+test('user posting during preparation preserves evidence and forbids another submission', async ({ page }) => {
+  await setup(page, '<div role="dialog"><div role="textbox" contenteditable="true"></div><input type="file" accept="image/*"><button class="post">Post</button></div>');
+  const attachment = { id: 'early-image', filename: 'pixel.png', mimeType: 'image/png', dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4AWJiYGBgAAAAAP//XRcpzQAAAAZJREFUAwAADwADJDd96QAAAABJRU5ErkJggg==' };
+  await page.evaluate(() => document.querySelector<HTMLInputElement>('input')!.onchange = () => { document.body.dataset.uploadStarted = 'true'; });
+  const pending = send(page, { type: 'PREPARE_CAPTION', ...job, attachments: [attachment], allowUnverifiedImages: true });
+  await expect(page.locator('body')).toHaveAttribute('data-upload-started', 'true');
+  await page.getByRole('button', { name: 'Post', exact: true }).click();
+  expect(await pending).toMatchObject({ ok: false, clicked: true, reason: 'ALREADY_SUBMITTED' });
+  expect(await send(page, { type: 'PUBLISH_POST', ...job })).toMatchObject({ ok: false, clicked: true, reason: 'ALREADY_SUBMITTED' });
+  expect(await page.evaluate(() => (window as unknown as { finalPostClicks: number }).finalPostClicks)).toBe(1);
+});

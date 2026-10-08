@@ -1,4 +1,4 @@
-# Chuẩn bị bài viết theo chiến dịch, người dùng tự bấm Đăng
+# Đăng bài theo chiến dịch với nút bật/tắt tự bấm Đăng
 
 ## Chuẩn bị và cập nhật tiện ích
 
@@ -12,7 +12,7 @@
 
 1. Chọn chiến dịch, bấm **Bắt đầu chuẩn bị bài**.
 2. Tiện ích mở nhóm đến hạn, điền caption, gắn ảnh và kiểm tra preview.
-3. Kiểm tra nội dung/ảnh, rồi **tự bấm Đăng trên Facebook**. Tiện ích không tự bấm Đăng trong chiến dịch.
+3. Chọn nút gạt **Tự động bấm Đăng** trước khi bắt đầu: mặc định tắt để bạn kiểm tra và tự bấm Đăng trên Facebook; bật để tiện ích tự bấm khi caption, ảnh và nút Đăng đã được xác minh. Để đổi chế độ, dừng theo dõi và xử lý bài đang chờ trước.
 4. Chỉ tín hiệu xác nhận đăng đáng tin cậy mới ghi thành công và chuyển nhóm tiếp theo khi đến lịch.
 5. Chờ quản trị viên duyệt, mất mạng hoặc kết quả chưa rõ: giữ tạm dừng, không bấm Đăng lần nữa. Chỉ chọn **Tôi xác nhận bài đã được đăng** sau khi kiểm tra bài thực tế trong nhóm.
 
@@ -26,3 +26,5 @@
 - Copy caption vẫn dùng được khi editor Facebook không giữ định dạng.
 
 Các kiểm thử dùng Facebook DOM giả lập và popup/service worker extension thật. **LIVE FACEBOOK: NOT TESTED** trong lượt sửa này; không có bài đăng Facebook thật.
+
+Preview ảnh được đối chiếu bằng bytes hoặc pixels đã giải mã, nên preview được mã hóa lại không còn bị từ chối chỉ vì bytes khác. Preview chuyển từ nguồn local đã khớp sang CDN trên cùng phần tử ảnh được hỗ trợ. Preview CDN không truy vết được, ảnh nén mất dữ liệu hoặc ảnh khác chưa đủ căn cứ vẫn cần kiểm tra thủ công. Khi tắt Auto, lỗi xác minh preview được hiển thị như nhắc kiểm tra; bạn tự xem caption/ảnh và bấm Đăng trên Facebook. Đừng tải thêm ảnh khi các ảnh đã hiện đủ. Build/reload extension và refresh tab Facebook sau khi cập nhật; thay đổi server cũng cần được triển khai để lưu nguồn click.

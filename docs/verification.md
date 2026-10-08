@@ -29,7 +29,7 @@ The tables below describe an earlier run, not the current repair. Current result
 | Queue | Concurrent device claims, future jobs, paused campaigns, stale claims, posted/skipped/failed outcomes, incomplete jobs prevent premature completion |
 | History | Outcome records and CSV export |
 | Devices | Pair expiry, single use, revocation, expiry, disabled account and workspace isolation |
-| Extension | Background worker unit checks and real Chromium extension loading/pairing/job navigation/copy/preparation/media/reporting/revocation; assisted preparation and trusted user-click verification across controlled groups; Stop and uncertain outcome protection |
+| Extension | Background worker unit checks and real Chromium extension loading/pairing/job navigation/copy/preparation/media/reporting/revocation; default assisted preparation, opt-in automatic Post across controlled groups, persisted mode selection, and trusted user-click verification; Stop and uncertain outcome protection |
 | Facebook adapter | Controlled composer, missing composer, verification screen, preparation never posts; explicit publish clicks once; wrong group, disabled and ambiguous buttons rejected; edited captions preserved; image previews, fresh publication notices, approval and cancellation |
 | Durable submissions | Foreign campaign/submission rejection, reservation before click, repeated begin rejected, release after no click, expired AWAITING_CONFIRMATION jobs cannot be reclaimed |
 | Database | PostgreSQL migrations in a disposable schema; seed runs twice with unchanged counts |

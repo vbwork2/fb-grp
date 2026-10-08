@@ -165,6 +165,29 @@ describe("manual-confirmed automatic campaign (no three-group limit)", () => {
       ? { ok: true, url: tabUrl, readyState: "interactive" }
       : { ok: true });
   }
+  it("reserves an early user Post click instead of failing and retrying the job", async () => {
+    configure();
+    tabMessage.mockImplementation(async (_tab: number, message: { type: string }) => message.type === "PING"
+      ? { ok: true, url: tabUrl, readyState: "interactive" }
+      : message.type === "PREPARE_CAPTION" ? { ok: false, clicked: true, reason: "ALREADY_SUBMITTED" } : { ok: true });
+    await send({ type: "AUTO_START", campaignId });
+    await vi.waitFor(() => expect(saved.automatic).toMatchObject({ phase: "PAUSED", enabled: false }));
+    expect(saved.job).toMatchObject({ publishAttempted: true });
+    expect(fetchMock.mock.calls.some(call => String(call[0]).endsWith("/submission"))).toBe(true);
+    expect(fetchMock.mock.calls.some(call => String(call[0]).endsWith("/failed"))).toBe(false);
+  });
+  it("manual preparation warnings keep the campaign waiting for the user", async () => {
+    configure();
+    tabMessage.mockImplementation(async (_tab: number, message: { type: string }) => message.type === "PING"
+      ? { ok: true, url: tabUrl, readyState: "interactive" }
+      : { ok: true, warning: message.type === "PREPARE_CAPTION" ? "Review images manually" : undefined });
+    await send({ type: "AUTO_START", campaignId });
+    await vi.waitFor(() => expect(saved.automatic).toMatchObject({ phase: "AWAITING_USER", enabled: true, status: "Review images manually" }));
+    expect(tabMessage).toHaveBeenCalledWith(1, expect.objectContaining({ type: "PREPARE_CAPTION", allowUnverifiedImages: true }));
+    expect(tabMessage).toHaveBeenCalledWith(1, expect.objectContaining({ type: "ARM_USER_POST", allowUnverifiedImages: true }));
+    expect(tabMessage.mock.calls.some(call => call[1].type === "PUBLISH_POST")).toBe(false);
+    expect(fetchMock.mock.calls.some(call => String(call[0]).endsWith("/failed"))).toBe(false);
+  });
   it("prepares each group for user Post click; confirms and proceeds through four groups", async () => {
     configure();
     expect((await send({ type: "AUTO_START", campaignId })).ok).toBe(true);
@@ -211,6 +234,37 @@ describe("manual-confirmed automatic campaign (no three-group limit)", () => {
     expect(fetchMock.mock.calls.some((call) => JSON.parse(String(call[1]?.body ?? "{}" )).clickSource === "automatic")).toBe(true);
     expect((await send({ type: "AUTO_START", campaignId })).ok).toBe(false);
     expect((await send({ type: "AUTO_SET_PUBLISH", enabled: false })).ok).toBe(false);
+  });
+
+  it("opt-in automatic Post confirms four groups without user clicks", async () => {
+    configure();
+    const original = fetchMock.getMockImplementation()!;
+    let claims = 0;
+    fetchMock.mockImplementation(async (url, init) => {
+      if (String(url).includes("/jobs/next") && ++claims > 4) return json({ job: null, campaignStatus: "COMPLETED", remaining: 0 });
+      return original(url, init);
+    });
+    await send({ type: "AUTO_SET_PUBLISH", enabled: true });
+    tabMessage.mockImplementation(async (_tab: number, message: { type: string }) => message.type === "PING" ? { ok: true, url: tabUrl, readyState: "interactive" } : message.type === "PUBLISH_POST" ? { ok: true, clicked: true, outcome: "published" } : { ok: true });
+    await send({ type: "AUTO_START", campaignId });
+    await vi.waitFor(() => expect(saved.automatic).toMatchObject({ enabled: false, status: "Automatic posting completed.", attempts: 4 }));
+    expect(tabMessage.mock.calls.filter((call) => call[1].type === "PUBLISH_POST")).toHaveLength(4);
+    expect(fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/posted"))).toHaveLength(4);
+    expect(saved.job).toBeUndefined();
+  });
+  it("lost automatic submit response keeps the reservation and prevents another attempt", async () => {
+    configure();
+    await send({ type: "AUTO_SET_PUBLISH", enabled: true });
+    tabMessage.mockImplementation(async (_tab: number, message: { type: string }) => {
+      if (message.type === "PING") return { ok: true, url: tabUrl, readyState: "interactive" };
+      if (message.type === "PUBLISH_POST") throw new Error("Connection interrupted after dispatch");
+      return { ok: true };
+    });
+    await send({ type: "AUTO_START", campaignId });
+    await vi.waitFor(() => expect(saved.automatic).toMatchObject({ enabled: false, phase: "PAUSED", errorCode: "POST_OUTCOME_UNKNOWN" }));
+    expect(saved.job).toMatchObject({ publishAttempted: true });
+    expect(fetchMock.mock.calls.some((call) => JSON.parse(String(call[1]?.body ?? "{}" )).action === "release")).toBe(false);
+    expect((await send({ type: "AUTO_START", campaignId })).ok).toBe(false);
   });
   it("allows toggling off before starting and rejects a tab changing the preference", async () => {
     configure();

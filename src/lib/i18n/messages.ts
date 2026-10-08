@@ -1,4 +1,5 @@
 export const vietnamese: Record<string, string> = {
+  "Review the caption and attached images on Facebook, then click Post yourself. Image preview verification is unavailable.": "Kiểm tra caption và các ảnh trên Facebook rồi tự bấm Đăng. Chế độ thủ công không yêu cầu extension xác minh preview ảnh.",
   "Change the posting mode in the extension popup.": "Thay đổi chế độ đăng trong popup extension.",
   "Stop monitoring and resolve the current post before changing the posting mode.": "Dừng theo dõi và xử lý bài hiện tại trước khi đổi chế độ đăng.",
   "Wait for Facebook verification before confirming this post.": "Chờ kiểm tra kết quả trên Facebook trước khi xác nhận bài này.",

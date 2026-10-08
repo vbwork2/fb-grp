@@ -408,8 +408,13 @@ async function runAutomatic() {
     }
     const prepared = await chrome.tabs.sendMessage(tab.id, {
       type: "PREPARE_CAPTION", jobId: job.id, expectedGroupUrl: job.group.url,
-      caption: job.content.caption, linkUrl: job.content.linkUrl, attachments,
-    }) as { ok?: boolean; message?: string; reason?: string };
+      caption: job.content.caption, linkUrl: job.content.linkUrl, attachments, allowUnverifiedImages: !run.autoClickPost,
+    }) as { ok?: boolean; message?: string; reason?: string; warning?: string; clicked?: boolean };
+    if (!prepared?.ok && prepared?.clicked) {
+      // A user click during preparation must remain reserved for manual review.
+      await api("/api/extension/jobs/" + job.id + "/submission", { claimToken: job.claimToken, action: "begin", automatic: true });
+      await chrome.storage.local.set({ job: { ...job, publishAttempted: true } });
+    }
     if (!prepared?.ok) throw Object.assign(new Error(prepared?.message ?? "The Facebook post could not be prepared."), { code: prepared?.reason ?? "PREPARE_FAILED" });
     await active(run);
     // Reserve before installing the watcher. Reservation is not click evidence.
@@ -419,10 +424,10 @@ async function runAutomatic() {
     await chrome.storage.local.set({ job: { ...job, publishAttempted: true } });
     await updateAutomatic(run, {
       phase: "AWAITING_USER", attempts: run.attempts + 1,
-      status: "Ready. Review the caption and images, then click Post on Facebook.",
+      status: prepared.warning ?? "Ready. Review the caption and images, then click Post on Facebook.",
     });
     const armed = await chrome.tabs.sendMessage(tab.id, {
-      type: "ARM_USER_POST", jobId: job.id, expectedGroupUrl: job.group.url,
+      type: "ARM_USER_POST", jobId: job.id, expectedGroupUrl: job.group.url, allowUnverifiedImages: !run.autoClickPost,
     }) as { ok?: boolean; message?: string };
     if (!armed?.ok) throw new Error(armed?.message ?? "Cannot monitor the Facebook Post button. Review the post manually.");
     watchedJobs.add(job.id);
@@ -461,7 +466,7 @@ async function runAutomatic() {
           await chrome.storage.local.remove("job");
         } catch { /* Keep the claim for manual review if recording failed. */ }
       }
-      await stopAutomatic(cause instanceof Error ? cause.message : "Automatic posting was paused.", (cause as { code?: string })?.code ?? "PREPARE_FAILED");
+      await stopAutomatic(cause instanceof Error ? cause.message : "Automatic posting was paused.", (cause as { code?: string })?.code ?? (job?.publishAttempted ? "POST_OUTCOME_UNKNOWN" : "PREPARE_FAILED"));
     }
   } finally {
     automaticBusy = false;
