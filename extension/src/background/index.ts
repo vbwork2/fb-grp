@@ -336,6 +336,8 @@ async function runAutomatic() {
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
     if (!responsive) throw new Error("The Facebook adapter is unavailable. Reload the extension and Facebook tab.");
+    const unlocked = await chrome.tabs.sendMessage(tab.id, { type: "RESET_SAFE_JOB", jobId: job.id }) as { ok?: boolean };
+    if (!unlocked?.ok) throw new Error("This Facebook post may have already been submitted. Review it before retrying.");
     await updateAutomatic(run, { phase: "PREPARING", status: "Opening Facebook's composer." });
     const attachments: { id: string; filename: string; mimeType: string; dataUrl: string }[] = [];
     for (const file of job.content.media) {
