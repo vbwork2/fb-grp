@@ -213,3 +213,37 @@ test("inline composer fallback recognizes text without an interactive role", asy
   expect((await send(page, { type: "PREPARE_CAPTION", ...job })).ok).toBe(true);
   await expect(page.locator("[role='dialog'] [role='textbox']")).toContainText("Reviewed caption");
 });
+
+
+test("a group comment form is not a post composer", async ({ page }) => {
+  await setup(page, '<form id="comment-form"><div role="textbox" contenteditable="true">Bình luận</div></form>');
+  const result = await send(page, { type: "PREPARE_CAPTION", ...job });
+  expect(result).toMatchObject({ ok: false, clicked: false, reason: "COMPOSER_NOT_FOUND" });
+  await expect(page.locator("#comment-form [role='textbox']")).toHaveText("Bình luận");
+});
+
+test("image picker inserted outside the dialog is accepted only after Photo/video is opened", async ({ page }) => {
+  await setup(page, '<div role="dialog"><div role="textbox" contenteditable="true"></div><button id="photo">Ảnh/video</button><button id="post" disabled>Đăng</button></div>');
+  await page.evaluate(() => {
+    const dialog = document.querySelector<HTMLElement>("[role='dialog']")!;
+    dialog.querySelector<HTMLButtonElement>("#photo")!.onclick = () => {
+      const picker = document.createElement("input");
+      picker.type = "file";
+      picker.accept = "image/png";
+      picker.onchange = () => {
+        document.body.dataset.uploaded = picker.files?.[0]?.name ?? "";
+        const image = document.createElement("img"); image.src = URL.createObjectURL(picker.files![0]);
+        image.width = 30; image.height = 30;
+        dialog.append(image);
+        dialog.querySelector<HTMLButtonElement>("#post")!.disabled = false;
+      };
+      document.body.append(picker);
+    };
+  });
+  const attachments = [{
+    id: "portal-image", filename: "portal.png", mimeType: "image/png",
+    dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ1sAAAAASUVORK5CYII="
+  }];
+  expect((await send(page, { type: "PREPARE_CAPTION", ...job, attachments })).ok).toBe(true);
+  await expect(page.locator("body")).toHaveAttribute("data-uploaded", "portal.png");
+});
