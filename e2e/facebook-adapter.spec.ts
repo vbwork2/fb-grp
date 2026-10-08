@@ -164,3 +164,118 @@ test("stopping while the composer loads prevents caption changes", async ({ page
   expect(await pending).toMatchObject({ ok: false, clicked: false });
   await expect(page.getByRole("textbox")).toBeEmpty();
 });
+
+test("screenshot-like group page: use inline composer, attach image and publish only once", async ({ page }) => {
+  await setup(page,
+    '<div role="textbox" contenteditable="true" id="comment">Bình luận dưới tên Mì</div>' +
+    '<section id="feed"><div id="inline" role="button"><span>Bạn viết gì đi....</span></div></section>' +
+    '<aside><button id="sidebar">Tạo bài viết</button></aside>'
+  );
+  await page.evaluate(() => {
+    document.getElementById("sidebar")!.onclick = () => { document.body.dataset.sidebarClicked = "yes"; };
+    document.getElementById("inline")!.onclick = () => {
+      document.body.dataset.inlineClicked = "yes";
+      const dialog = document.createElement("div");
+      dialog.setAttribute("role", "dialog");
+      dialog.innerHTML = '<div role="textbox" contenteditable="true"></div><button id="photo">Ảnh/video</button><button id="post" disabled>Đăng</button>';
+      document.body.append(dialog);
+      dialog.querySelector<HTMLButtonElement>("#photo")!.onclick = () => {
+        const input = document.createElement("input");
+        input.type = "file"; input.accept = "image/*"; input.multiple = true;
+        input.onchange = () => {
+          document.body.dataset.uploaded = input.files?.[0]?.name ?? "";
+          const preview = document.createElement("img");
+          preview.src = URL.createObjectURL(input.files![0]); preview.width = 30; preview.height = 30;
+          dialog.append(preview);
+          dialog.querySelector<HTMLButtonElement>("#post")!.disabled = false;
+        };
+        dialog.append(input);
+      };
+      dialog.querySelector<HTMLButtonElement>("#post")!.onclick = () => {
+        document.body.dataset.posted = "true";
+        const notice = document.createElement("div");
+        notice.setAttribute("role", "status");
+        notice.textContent = "Your post was published.";
+        document.body.append(notice);
+      };
+    };
+  });
+  const attachments = [{
+    id: "image-2", filename: "sample.png", mimeType: "image/png",
+    dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ1sAAAAASUVORK5CYII="
+  }];
+  expect((await send(page, { type: "PREPARE_CAPTION", ...job, attachments })).ok).toBe(true);
+  await expect(page.locator("body")).toHaveAttribute("data-inline-clicked", "yes");
+  await expect(page.locator("body")).not.toHaveAttribute("data-sidebar-clicked", "yes");
+  await expect(page.locator("body")).toHaveAttribute("data-uploaded", "sample.png");
+  await expect(page.locator("#comment")).toHaveText("Bình luận dưới tên Mì");
+  await expect(page.locator("[role='dialog'] [role='textbox']")).toContainText("Reviewed caption");
+  const result = await send(page, { type: "PUBLISH_POST", ...job, trackOutcome: true });
+  expect(result).toMatchObject({ ok: true, clicked: true, outcome: "published" });
+  await expect(page.locator("body")).toHaveAttribute("data-posted", "true");
+  expect((await send(page, { type: "PUBLISH_POST", ...job })).reason).toBe("ALREADY_SUBMITTED");
+});
+
+test("English Write something is preferred over the sidebar Create post", async ({ page }) => {
+  await setup(page, '<button id="inline">Write something...</button><button id="sidebar">Create post</button>');
+  await page.evaluate(() => {
+    document.getElementById("sidebar")!.onclick = () => { document.body.dataset.sidebarClicked = "yes"; };
+    document.getElementById("inline")!.onclick = () => {
+      const dialog = document.createElement("div");
+      dialog.setAttribute("role", "dialog");
+      dialog.innerHTML = '<div role="textbox" contenteditable="true"></div><button>Post</button>';
+      document.body.append(dialog);
+    };
+  });
+  expect((await send(page, { type: "PREPARE_CAPTION", ...job })).ok).toBe(true);
+  await expect(page.locator("[role='dialog'] [role='textbox']")).toContainText("Reviewed caption");
+  await expect(page.locator("body")).not.toHaveAttribute("data-sidebar-clicked", "yes");
+});
+
+test("inline composer fallback recognizes text without an interactive role", async ({ page }) => {
+  await setup(page, '<div id="feed"><div id="launcher"><span>Bạn viết gì đi....</span></div></div><button id="sidebar">Tạo bài viết</button>');
+  await page.evaluate(() => {
+    document.getElementById("launcher")!.onclick = () => {
+      const dialog = document.createElement("div");
+      dialog.setAttribute("role", "dialog");
+      dialog.innerHTML = '<div role="textbox" contenteditable="true"></div><button>Đăng</button>';
+      document.body.append(dialog);
+    };
+  });
+  expect((await send(page, { type: "PREPARE_CAPTION", ...job })).ok).toBe(true);
+  await expect(page.locator("[role='dialog'] [role='textbox']")).toContainText("Reviewed caption");
+});
+
+
+test("a group comment form is not a post composer", async ({ page }) => {
+  await setup(page, '<form id="comment-form"><div role="textbox" contenteditable="true">Bình luận</div></form>');
+  const result = await send(page, { type: "PREPARE_CAPTION", ...job });
+  expect(result).toMatchObject({ ok: false, clicked: false, reason: "COMPOSER_NOT_FOUND" });
+  await expect(page.locator("#comment-form [role='textbox']")).toHaveText("Bình luận");
+});
+
+test("image picker inserted outside the dialog is accepted only after Photo/video is opened", async ({ page }) => {
+  await setup(page, '<div role="dialog"><div role="textbox" contenteditable="true"></div><button id="photo">Ảnh/video</button><button id="post" disabled>Đăng</button></div>');
+  await page.evaluate(() => {
+    const dialog = document.querySelector<HTMLElement>("[role='dialog']")!;
+    dialog.querySelector<HTMLButtonElement>("#photo")!.onclick = () => {
+      const picker = document.createElement("input");
+      picker.type = "file";
+      picker.accept = "image/png";
+      picker.onchange = () => {
+        document.body.dataset.uploaded = picker.files?.[0]?.name ?? "";
+        const image = document.createElement("img"); image.src = URL.createObjectURL(picker.files![0]);
+        image.width = 30; image.height = 30;
+        dialog.append(image);
+        dialog.querySelector<HTMLButtonElement>("#post")!.disabled = false;
+      };
+      document.body.append(picker);
+    };
+  });
+  const attachments = [{
+    id: "portal-image", filename: "portal.png", mimeType: "image/png",
+    dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ1sAAAAASUVORK5CYII="
+  }];
+  expect((await send(page, { type: "PREPARE_CAPTION", ...job, attachments })).ok).toBe(true);
+  await expect(page.locator("body")).toHaveAttribute("data-uploaded", "portal.png");
+});
