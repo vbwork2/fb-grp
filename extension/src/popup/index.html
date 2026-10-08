@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Groupflow</title>
+    <style>
+      body{width:340px;margin:0;padding:18px;font:13px Arial,sans-serif;color:#14241f;background:#f7f9f7}h1{font-size:17px;margin:0 0 4px}p{color:#68776f;line-height:1.45}.panel{background:#fff;border:1px solid #e1e9e3;border-radius:9px;padding:14px;margin:12px 0}.field{display:grid;gap:5px;margin:10px 0}.field label{font-size:11px;font-weight:bold}.field input{padding:9px;border:1px solid #dce5df;border-radius:6px}.buttons{display:flex;gap:7px;flex-wrap:wrap}button{background:white;color:#18251f;border:1px solid #dfe8e1;border-radius:6px;padding:9px 11px;font-weight:bold;cursor:pointer}button.primary{background:#176c50;color:white;border-color:#176c50}button:disabled{opacity:.45;cursor:default}.status{min-height:16px;color:#9b3838;font-size:12px}.caption{white-space:pre-wrap;max-height:125px;overflow:auto;background:#f5f8f5;padding:9px;border-radius:6px;line-height:1.4}.hidden{display:none}.job-title{font-weight:bold;margin-bottom:6px}
+    </style>
+  </head>
+  <body>
+    <div class="field"><label id="languageLabel" for="language">Language</label><select id="language"><option value="en">English</option><option value="vi">Tiếng Việt</option></select></div><h1>Groupflow</h1><p data-i18n="Prepare the caption, click Publish to Facebook, then verify the result.">Prepare the caption, click Publish to Facebook, then verify the result.</p>
+    <section id="setup" class="panel"><div class="field"><label for="apiUrl" data-i18n="Application URL">Application URL</label><input id="apiUrl" type="url" placeholder="https://your-app.netlify.app" /></div><div class="field"><label for="code" data-i18n="One-time pairing code">One-time pairing code</label><input id="code" inputmode="numeric" placeholder="829-421" /></div><button id="pair" class="primary" data-i18n="Connect device">Connect device</button></section>
+    <section id="workflow" class="panel hidden"><div class="field"><label for="autoCampaign" data-i18n="Automatic campaign (up to 3 groups)">Automatic campaign (up to 3 groups)</label><select id="autoCampaign"></select></div><p data-i18n="Keep Chrome open and signed in to Facebook. Images will be attached automatically.">Keep Chrome open and signed in to Facebook. Images will be attached automatically.</p><div class="buttons"><button id="autoStart" class="primary" disabled data-i18n="Start automatic posting">Start automatic posting</button><button id="autoStop" disabled data-i18n="Stop automatic posting">Stop automatic posting</button><button id="autoRefresh" data-i18n="Refresh campaigns">Refresh campaigns</button></div><p id="automaticStatus" role="status"></p><hr /><div class="job-title" id="groupName">No active job</div><div id="groupInfo"></div><div id="caption" class="caption hidden"></div><div id="media" class="buttons"></div><label id="imageConfirmation" class="hidden"><input type="checkbox" id="imagesAttached" /><span data-i18n="Images attached in Facebook">Images attached in Facebook</span></label><div class="buttons" style="margin-top:12px"><button id="next" class="primary" data-i18n="Get next group">Get next group</button><button id="open" class="hidden" data-i18n="Open group">Open group</button><button id="prepare" class="hidden" data-i18n="Prepare caption">Prepare caption</button><button id="copy" class="hidden" data-i18n="Copy caption">Copy caption</button><button id="publish" class="primary hidden" data-i18n="Publish to Facebook">Publish to Facebook</button><button id="posted" class="hidden" data-i18n="I posted it">I posted it</button><button id="skip" class="hidden" data-i18n="Skip group">Skip group</button><button id="failed" class="hidden" data-i18n="Report issue">Report issue</button></div></section>
+    <section class="panel"><div id="status" class="status" role="status"></div><button id="disconnect" data-i18n="Disconnect device">Disconnect device</button></section>
+    <script type="module" src="main.ts"></script>
+  </body>
+</html>
+
+
