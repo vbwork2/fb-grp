@@ -32,4 +32,4 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
       - name: Test Facebook adapter on controlled UI
-        run: npx playwright test e2e/facebook-adapter.spec.ts --project=chromium
+        run: npx playwright test e2e/facebook-adapter.spec.ts
