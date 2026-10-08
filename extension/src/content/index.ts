@@ -114,6 +114,13 @@ async function waitFor<T>(read: () => T | undefined, milliseconds: number): Prom
 }
 
 function cancelled(message: ComposerMessage) { return Boolean(message.jobId && cancelledJobs.has(message.jobId)); }
+function reportStage(message: ComposerMessage, stage: string): void {
+  if (message.type !== "PREPARE_CAPTION" || !message.jobId) return;
+  // Reporting is best-effort and must never prevent caption/image preparation.
+  try {
+    void chrome.runtime.sendMessage?.({ type: "AUTO_STAGE", jobId: message.jobId, stage })?.catch(() => undefined);
+  } catch { /* The background worker might have restarted. */ }
+}
 
 async function attachImages(scope: Element, message: ComposerMessage): Promise<boolean> {
   if (!message.attachments?.length || !message.jobId) return true;
@@ -163,6 +170,7 @@ async function uploadImages(scope: Element, message: ComposerMessage): Promise<b
   input.dispatchEvent(new Event("change", { bubbles: true }));
   for (const file of pending) attached.add(file.id);
   uploadedFiles.set(message.jobId, attached);
+  reportStage(message, "VERIFY_UPLOAD");
   return Boolean(await waitFor(() => {
     if (cancelled(message)) return false;
     const previews = [...scope.querySelectorAll<HTMLImageElement>("img")].filter((image) => visible(image) && previousImages.get(image) !== image.src);
@@ -195,13 +203,23 @@ async function handle(message: ComposerMessage): Promise<AdapterResult> {
   const publish = message.type === "PUBLISH_POST";
   if (publish && (!message.jobId || !message.expectedGroupUrl)) return { ok: false, clicked: false, reason: "INVALID_JOB" };
   if (publish && attemptedJobs.has(message.jobId!)) return { ok: false, clicked: true, reason: "ALREADY_SUBMITTED", message: "A publish attempt was already sent. Check Facebook before confirming the result." };
+  reportStage(message, "OPEN_COMPOSER");
   const editor = await composer();
   if (!editor) return { ok: false, clicked: false, reason: "COMPOSER_NOT_FOUND", message: "Open the Facebook post composer, then retry. Copy and paste remains available." };
   const scope = editor.closest("[role='dialog'], form");
   if (publish && !scope) return { ok: false, clicked: false, reason: "POST_BUTTON_NOT_FOUND", message: "Open the Facebook post dialog before publishing." };
-  if (!publish || preparedJob?.id !== message.jobId || preparedJob?.editor !== editor) fill(editor, message);
-  if (message.attachments?.length && (!scope || !(await attachImages(scope, message)))) return { ok: false, clicked: false, message: "Images could not be attached or did not finish uploading. Automatic posting was paused." };
-  if (!publish) return { ok: true, clicked: false };
+  if (!publish || preparedJob?.id !== message.jobId || preparedJob?.editor !== editor) {
+    reportStage(message, "FILL_CAPTION");
+    fill(editor, message);
+  }
+  if (message.attachments?.length) {
+    reportStage(message, "ATTACH_IMAGES");
+    if (!scope || !(await attachImages(scope, message))) return { ok: false, clicked: false, message: "Images could not be attached or did not finish uploading. Automatic posting was paused." };
+  }
+  if (!publish) {
+    reportStage(message, "PREPARED");
+    return { ok: true, clicked: false };
+  }
   const text = editor instanceof HTMLTextAreaElement ? editor.value : editor.textContent;
   if (!text?.trim()) return { ok: false, clicked: false, reason: "EMPTY_CAPTION", message: "The Facebook caption is empty. Prepare the caption before publishing." };
   const buttons = [...scope!.querySelectorAll<HTMLElement>("button, [role='button']")].filter((element) => visible(element) && /^(post|publish|đăng|đăng bài)$/i.test((element.getAttribute("aria-label") ?? element.innerText).trim()));
