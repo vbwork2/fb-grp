@@ -1,4 +1,9 @@
 export const vietnamese: Record<string, string> = {
+  "Opening the Facebook post composer.": "Đang mở cửa sổ viết bài Facebook.",
+  "Filling in the caption.": "Đang nhập nội dung bài viết.",
+  "Attaching images to the post.": "Đang đính kèm ảnh.",
+  "Waiting for images to finish uploading.": "Đang đợi ảnh tải lên hoàn tất.",
+  "Caption and images are ready to publish.": "Đã chuẩn bị xong nội dung và ảnh, sẵn sàng đăng.",
   "Simple Facebook Group posting": "Đăng bài nhóm Facebook dễ dàng",
   "Connect your browser once": "Kết nối trình duyệt một lần",
   "Get the one-time code from Settings on your Groupflow website.": "Lấy mã kết nối trong mục Cài đặt trên web Groupflow.",
