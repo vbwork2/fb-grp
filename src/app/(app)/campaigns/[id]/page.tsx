@@ -20,7 +20,7 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
     .limit(1);
   if (!campaignRow) notFound();
 
-  const [selectedGroups, queue] = await Promise.all([
+  const [selectedGroups, queue, availableGroups, availableContents] = await Promise.all([
     db
       .select({ group: groups, position: campaignGroups.position })
       .from(campaignGroups)
@@ -33,6 +33,8 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
       .innerJoin(groups, eq(queueItems.groupId, groups.id))
       .where(and(eq(queueItems.campaignId, id), eq(queueItems.workspaceId, identity.workspaceId)))
       .orderBy(asc(queueItems.position)),
+    db.select().from(groups).where(eq(groups.workspaceId, identity.workspaceId)).orderBy(asc(groups.name)),
+    db.select().from(contents).where(eq(contents.workspaceId, identity.workspaceId)).orderBy(asc(contents.name)),
   ]);
 
   return (
@@ -61,6 +63,8 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
         </div>
       </div>
       <CampaignDetail
+        availableGroups={availableGroups}
+        availableContents={availableContents}
         campaign={campaignRow.campaign}
         contentName={campaignRow.content.name}
         contentBody={campaignRow.content.body}

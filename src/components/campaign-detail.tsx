@@ -2,6 +2,8 @@
 
 import { T } from "@/components/language-provider";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
+import CampaignEditor from "@/components/campaign-editor";
 import {
   PlayIcon,
   PauseIcon,
@@ -20,6 +22,7 @@ type QueueEntry = {
   errorMessage: string | null;
 };
 type CampaignData = {
+  contentId: string;
   id: string;
   name: string;
   status: string;
@@ -29,19 +32,25 @@ type CampaignData = {
 
 export default function CampaignDetail({
   campaign,
+  availableGroups,
+  availableContents,
   contentName,
   contentBody,
   groups,
   queue: initialQueue,
 }: {
   campaign: CampaignData;
+  availableGroups: { id: string; name: string; facebookUrl: string; status: string }[];
+  availableContents: { id: string; name: string; body: string; linkUrl: string | null }[];
   contentName: string;
   contentBody: string;
   groups: { id: string; name: string; url: string }[];
   queue: QueueEntry[];
 }) {
+  const router = useRouter();
+  const [editing, setEditing] = useState(false);
   const [status, setStatus] = useState(campaign.status);
-  const [queue, setQueue] = useState(initialQueue);
+  const queue = initialQueue;
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -79,11 +88,6 @@ export default function CampaignDetail({
         return;
       }
       if (actionName === "retry") {
-        setQueue((current) =>
-          current.map((item) =>
-            item.status === "FAILED" ? { ...item, status: "READY", errorMessage: null } : item
-          )
-        );
         setStatus("RUNNING");
         setMessage(`${result.data?.retried ?? 0} failed jobs returned to the queue.`);
       } else {
@@ -91,6 +95,7 @@ export default function CampaignDetail({
         setStatus(updated);
         setMessage(`Campaign ${updated.toLowerCase()}.`);
       }
+      router.refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Campaign action failed.");
     } finally {
@@ -100,6 +105,11 @@ export default function CampaignDetail({
 
   return (
     <>
+      <div className="panel">
+        <div className="panel-head"><h2><T>{"Campaign settings"}</T></h2><button type="button" className="button" disabled={busy || !["READY", "PAUSED"].includes(status)} onClick={() => setEditing((current) => !current)} aria-expanded={editing}><T>{"Edit campaign"}</T></button></div>
+        {!["READY", "PAUSED"].includes(status) && <p className="muted" style={{ padding: "0 20px 20px" }}><T>{"Pause the campaign before editing. Completed or cancelled campaigns cannot be edited."}</T></p>}
+      </div>
+      {editing && ["READY", "PAUSED"].includes(status) && <CampaignEditor campaign={campaign} selectedGroupIds={groups.map((group) => group.id)} availableGroups={availableGroups} availableContents={availableContents} onClose={() => setEditing(false)} />}
       {/* Metric summary cards */}
       <div className="cards">
         <section className="card">
