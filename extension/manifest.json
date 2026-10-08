@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Groupflow Posting Assistant",
   "version": "0.1.0",
-  "description": "Prepare posts or start automatic posting with images for up to three selected Facebook Groups.",
+  "description": "Prepare Facebook Group posts with images; you review and click Post to continue each group.",
   "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' data: blob:;" },
   "permissions": ["storage", "tabs", "clipboardWrite", "alarms"],
   "host_permissions": ["https://*.netlify.app/*", "https://www.facebook.com/*", "https://m.facebook.com/*", "http://localhost:3000/*"],
