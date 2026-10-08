@@ -3,7 +3,7 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: [".next/**", ".netlify/**", ".local-storage/**", "test-results/**", "playwright-report/**", "out/**", "build/**", "extension/dist/**", "extension/node_modules/**", "next-env.d.ts"],
+    ignores: [".agents/**", ".next/**", ".netlify/**", ".local-storage/**", "test-results/**", "playwright-report/**", "out/**", "build/**", "extension/dist/**", "extension/node_modules/**", "next-env.d.ts"],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
