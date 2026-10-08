@@ -22,7 +22,7 @@ Build with `npm run extension:build`. The unpacked extension is in `extension/di
 8. Use **Cancel campaign** to cancel the campaign on the server and stop local monitoring; it cannot retract posts submitted on Facebook.
 9. Use **Reset failed groups** after a preparation error. This resets only queue jobs with status `FAILED` and never resets `POSTED` or `AWAITING_CONFIRMATION` jobs. Restart the campaign to retry them.
 
-The previous three-group automatic limit was removed. The normal campaign maximum from the web form/database constraints still applies (up to 1000 selected groups). Each group's configured scheduled time must be reached before it can be prepared.
+The previous three-group automatic limit and the fixed campaign-selection cap were removed. Available groups are still bounded in practice by infrastructure capacity, Facebook's rules, and the need for a human click on each post. Each group's configured scheduled time must be reached before it can be prepared.
 
 Manual controls remain in Advanced. Authentication checks and server-side job reservations prevent unchecked repeats. Do not mark posts as published until verified on Facebook.
 
