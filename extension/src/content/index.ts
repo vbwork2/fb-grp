@@ -20,52 +20,77 @@ function groupPath(value: string): string | undefined {
   } catch { return; }
 }
 
-const EDITOR_SELECTOR = "div[contenteditable='true'][role='textbox'], div[contenteditable='true'][data-lexical-editor='true'], textarea[name='xhpc_message']";
+const EDITOR_SELECTOR = "div[contenteditable='true'][role='textbox'], div[contenteditable='true'][data-lexical-editor='true'], textarea[name='xhpc_message'], [role='dialog'] [contenteditable='true'][aria-label]";
 const COMPOSER_TIMEOUT_MS = 10_000;
 
 function editorCandidates(root: ParentNode = document): HTMLElement[] {
-  return [...root.querySelectorAll<HTMLElement>(EDITOR_SELECTOR)].filter(visible);
+  const candidates = [...root.querySelectorAll<HTMLElement>(EDITOR_SELECTOR)].filter(visible);
+  return candidates.filter((editor) => !candidates.some((other) => other !== editor && other.contains(editor)));
 }
 
-// Facebook can have unrelated comment editors on the group page. Never fill one
-// of those: the compose editor must be inside a visible dialog or form.
+// Only fill the post composer: never mistake the comment field in the feed
+// for the main post. The actual Facebook post form is a visible dialog.
 function openComposerEditor(): HTMLElement | undefined {
   const dialogs = [...document.querySelectorAll<HTMLElement>("[role='dialog']")].filter(visible);
-  const dialogEditors = dialogs.flatMap((dialog) => editorCandidates(dialog));
-  if (dialogEditors.length === 1) return dialogEditors[0];
-  if (dialogEditors.length > 1) return;
-  const formEditors = editorCandidates().filter((editor) => Boolean(editor.closest("form")));
-  return formEditors.length === 1 ? formEditors[0] : undefined;
+  const candidates = dialogs.flatMap((dialog) => editorCandidates(dialog));
+  if (candidates.length === 1) return candidates[0];
+  // Group comment fields may also live inside forms. Do not ever treat
+  // a non-dialog form as the Facebook post composer.
+  return undefined;
 }
 
-function composeTriggers(): HTMLElement[] {
-  // Exact English labels are not sufficient: Facebook localizes and personalizes
-  // them (for example "Bạn viết gì đi, ...?" or "What's on your mind, ...?").
-  const caption = /^(?:write something|what['’]?s on your mind|create (?:a )?post|start (?:a )?discussion|viết gì|viết bài|bạn viết gì|bạn đang nghĩ gì|tạo bài viết|bắt đầu thảo luận|chia sẻ điều gì)(?:$|[\s.,!?…])/i;
-  return [...document.querySelectorAll<HTMLElement>("button, [role='button']")].filter((element) => {
-    if (!visible(element)) return false;
-    const label = (element.getAttribute("aria-label") || element.innerText || "").replace(/\s+/g, " ").trim();
-    return caption.test(label);
-  });
+const INLINE_COMPOSER_TEXT = /^(?:bạn viết gì đi|viết gì đó|write something|what['’]s on your mind|bạn đang nghĩ gì)(?:$|[\s.,!?…])/i;
+const CREATE_POST_TEXT = /^(?:tạo bài viết|viết bài|create (?:a )?post|start (?:a )?discussion|bắt đầu thảo luận|chia sẻ điều gì)(?:$|[\s.,!?…])/i;
+
+function labelOf(element: HTMLElement): string {
+  return (element.getAttribute("aria-label") || element.innerText || element.textContent || "").replace(/\s+/g, " ").trim();
+}
+
+// Screenshot-based behavior: the center "Bạn viết gì đi..." trigger wins
+// over the right-side "Tạo bài viết" action. More than one equally good
+// match is an error, not permission to guess and click an unrelated control.
+function composeTriggers(): { primary: HTMLElement[]; fallback: HTMLElement[] } {
+  const primary = new Set<HTMLElement>();
+  const fallback = new Set<HTMLElement>();
+  const controls = [...document.querySelectorAll<HTMLElement>("button, [role='button']")];
+  for (const element of controls) {
+    if (!visible(element) || element.closest("[role='dialog']")) continue;
+    const label = labelOf(element);
+    if (INLINE_COMPOSER_TEXT.test(label)) primary.add(element);
+    else if (CREATE_POST_TEXT.test(label)) fallback.add(element);
+  }
+  // Some Facebook variants expose the text on a child span while the
+  // click handler is attached to a non-semantic div. The span receives
+  // the click and bubbles it to that div, but only for a unique label.
+  if (!primary.size) {
+    const leaves = [...document.querySelectorAll<HTMLElement>("span, p")].filter((element) =>
+      visible(element) && element.children.length === 0 && !element.closest("[role='dialog']")
+      && INLINE_COMPOSER_TEXT.test(labelOf(element))
+    );
+    for (const leaf of leaves) {
+      const clickable = leaf.closest<HTMLElement>("button, [role='button'], [tabindex='0']");
+      primary.add(clickable && visible(clickable) ? clickable : leaf);
+    }
+  }
+  return { primary: [...primary], fallback: [...fallback] };
 }
 
 async function composer(message: ComposerMessage): Promise<HTMLElement | undefined> {
   const existing = openComposerEditor();
   if (existing) return existing;
-  // Facebook can render its composer after the document has finished loading.
+  // Facebook may insert the Group feed controls after navigation completes.
+  // Preserve the latest main-branch delayed-render/cancellation safeguards.
   const entry = await waitFor(() => {
     const editor = openComposerEditor();
     if (editor) return { editor };
     const triggers = composeTriggers();
-    return triggers.length ? { triggers } : undefined;
+    return triggers.primary.length || triggers.fallback.length ? { triggers } : undefined;
   }, COMPOSER_TIMEOUT_MS);
-  if (!entry) return;
+  if (!entry) return undefined;
   if ("editor" in entry) return entry.editor;
-  // Never guess which trigger to click if the page is ambiguous.
-  if (entry.triggers.length !== 1 || cancelled(message)) return;
-  entry.triggers[0].click();
-  // Polling a small set of dialogs avoids a full-page MutationObserver reacting
-  // to Facebook's frequent feed updates and potentially stalling the tab.
+  const chosen = entry.triggers.primary.length ? entry.triggers.primary : entry.triggers.fallback;
+  if (chosen.length !== 1 || cancelled(message)) return undefined;
+  chosen[0].click();
   return waitFor(openComposerEditor, COMPOSER_TIMEOUT_MS);
 }
 
@@ -97,6 +122,13 @@ async function waitFor<T>(read: () => T | undefined, milliseconds: number): Prom
 }
 
 function cancelled(message: ComposerMessage) { return Boolean(message.jobId && cancelledJobs.has(message.jobId)); }
+function reportStage(message: ComposerMessage, stage: string): void {
+  if (message.type !== "PREPARE_CAPTION" || !message.jobId) return;
+  // Reporting is best-effort and must never prevent caption/image preparation.
+  try {
+    void chrome.runtime.sendMessage?.({ type: "AUTO_STAGE", jobId: message.jobId, stage })?.catch(() => undefined);
+  } catch { /* The background worker might have restarted. */ }
+}
 
 async function attachImages(scope: Element, message: ComposerMessage): Promise<boolean> {
   if (!message.attachments?.length || !message.jobId) return true;
@@ -112,13 +144,27 @@ async function uploadImages(scope: Element, message: ComposerMessage): Promise<b
   const attached = uploadedFiles.get(message.jobId) ?? new Set<string>();
   const pending = message.attachments.filter((file) => !attached.has(file.id));
   if (!pending.length) return true;
-  const inputs = () => [...scope.querySelectorAll<HTMLInputElement>("input[type='file']")].filter((input) => /image|\.jpg|\.png|\.webp/i.test(input.accept));
-  if (!inputs().length) {
-    const triggers = [...scope.querySelectorAll<HTMLElement>("button,[role='button']")].filter((element) => visible(element) && /^(photo\/video|photos\/videos|ảnh\/video)$/i.test((element.getAttribute("aria-label") ?? element.innerText).trim()));
+  const inputs = (root: ParentNode) => [...root.querySelectorAll<HTMLInputElement>("input[type='file']")]
+    .filter((input) => /image|\.jpg|\.jpeg|\.png|\.webp/i.test(input.accept));
+  let openedPhoto = false;
+  if (!inputs(scope).length) {
+    const triggers = [...scope.querySelectorAll<HTMLElement>("button,[role='button']")].filter((element) =>
+      visible(element) && /^(photo\/video|photos\/videos|ảnh\/video|ảnh và video|photo\/videos)$/i.test(labelOf(element))
+    );
     if (triggers.length !== 1) return false;
     triggers[0].click();
+    openedPhoto = true;
   }
-  const input = await waitFor(() => { const found = inputs(); return found.length === 1 ? found[0] : undefined; }, 4000);
+  const input = await waitFor(() => {
+    const scoped = inputs(scope);
+    if (scoped.length === 1) return scoped[0];
+    if (scoped.length > 1 || !openedPhoto) return undefined;
+    // Some Facebook layouts insert the picker input in a portal outside
+    // the dialog. Only use it if opening Photo/video revealed one unique
+    // image picker on the entire page.
+    const global = inputs(document);
+    return global.length === 1 ? global[0] : undefined;
+  }, 6000);
   if (!input || (!input.multiple && pending.length > 1) || cancelled(message)) return false;
   const transfer = new DataTransfer();
   for (const file of pending) {
@@ -132,6 +178,7 @@ async function uploadImages(scope: Element, message: ComposerMessage): Promise<b
   input.dispatchEvent(new Event("change", { bubbles: true }));
   for (const file of pending) attached.add(file.id);
   uploadedFiles.set(message.jobId, attached);
+  reportStage(message, "VERIFY_UPLOAD");
   return Boolean(await waitFor(() => {
     if (cancelled(message)) return false;
     const previews = [...scope.querySelectorAll<HTMLImageElement>("img")].filter((image) => visible(image) && previousImages.get(image) !== image.src);
@@ -164,14 +211,24 @@ async function handle(message: ComposerMessage): Promise<AdapterResult> {
   const publish = message.type === "PUBLISH_POST";
   if (publish && (!message.jobId || !message.expectedGroupUrl)) return { ok: false, clicked: false, reason: "INVALID_JOB" };
   if (publish && attemptedJobs.has(message.jobId!)) return { ok: false, clicked: true, reason: "ALREADY_SUBMITTED", message: "A publish attempt was already sent. Check Facebook before confirming the result." };
+  reportStage(message, "OPEN_COMPOSER");
   const editor = await composer(message);
   if (!editor) return { ok: false, clicked: false, reason: "COMPOSER_NOT_FOUND", message: "Open the Facebook post composer, then retry. Copy and paste remains available." };
   if (cancelled(message)) return { ok: false, clicked: false, message: "Automatic posting was stopped." };
   const scope = editor.closest("[role='dialog'], form");
   if (publish && !scope) return { ok: false, clicked: false, reason: "POST_BUTTON_NOT_FOUND", message: "Open the Facebook post dialog before publishing." };
-  if (!publish || preparedJob?.id !== message.jobId || preparedJob?.editor !== editor) fill(editor, message);
-  if (message.attachments?.length && (!scope || !(await attachImages(scope, message)))) return { ok: false, clicked: false, message: "Images could not be attached or did not finish uploading. Automatic posting was paused." };
-  if (!publish) return { ok: true, clicked: false };
+  if (!publish || preparedJob?.id !== message.jobId || preparedJob?.editor !== editor) {
+    reportStage(message, "FILL_CAPTION");
+    fill(editor, message);
+  }
+  if (message.attachments?.length) {
+    reportStage(message, "ATTACH_IMAGES");
+    if (!scope || !(await attachImages(scope, message))) return { ok: false, clicked: false, message: "Images could not be attached or did not finish uploading. Automatic posting was paused." };
+  }
+  if (!publish) {
+    reportStage(message, "PREPARED");
+    return { ok: true, clicked: false };
+  }
   const text = editor instanceof HTMLTextAreaElement ? editor.value : editor.textContent;
   if (!text?.trim()) return { ok: false, clicked: false, reason: "EMPTY_CAPTION", message: "The Facebook caption is empty. Prepare the caption before publishing." };
   const buttons = [...scope!.querySelectorAll<HTMLElement>("button, [role='button']")].filter((element) => visible(element) && /^(post|publish|đăng|đăng bài)$/i.test((element.getAttribute("aria-label") ?? element.innerText).trim()));
