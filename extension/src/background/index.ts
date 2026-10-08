@@ -198,6 +198,17 @@ async function cancelCampaign() {
   // Stop tracking first to prevent concurrent callbacks starting the next group.
   await stopAutomatic();
   await api("/api/extension/campaigns/cancel", { campaignId: run.campaignId });
+  const job = (await settings()).job;
+  if (job && job.campaignId === run.campaignId && !job.publishAttempted) {
+    // The post was never submitted by the assisted workflow. Release the
+    // abandoned claim so it won't block a different campaign later.
+    try {
+      await api("/api/extension/jobs/" + job.id + "/skip", {
+        claimToken: job.claimToken, notes: "Campaign cancelled before Facebook submission.",
+      });
+      await chrome.storage.local.remove("job");
+    } catch { /* Leave the claim untouched if the server cannot confirm the skip. */ }
+  }
   await chrome.storage.local.set({ automatic: { ...(await automaticState()), status: "Campaign cancelled.", error: "" } });
 }
 async function resetFailed() {
