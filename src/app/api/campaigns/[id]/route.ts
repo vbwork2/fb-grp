@@ -1,3 +1,4 @@
+import { deleteCampaign } from "@/lib/services/delete-campaign";
 import { editCampaign } from "@/lib/services/edit-campaign";
 import { isHttpUrl } from "@/lib/validators/urls";
 import { and, eq } from "drizzle-orm";
@@ -54,4 +55,17 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (result.error === "missing") return jsonError("RESOURCE_NOT_FOUND", "Campaign not found.", 404);
   if (result.error === "invalid") return jsonError("INVALID_STATE", "This campaign cannot use that action in its current state.", 409);
   return jsonSuccess({ id, status: nextStatus });
+}
+
+export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  if (!verifySameOrigin(request)) return jsonError("INVALID_ORIGIN", "Request origin is not allowed.", 403);
+  const identity = await getIdentity();
+  if (!identity) return jsonError("UNAUTHORIZED", "Sign in to continue.", 401);
+  const { id } = await context.params;
+  if (!z.string().uuid().safeParse(id).success) return jsonError("INVALID_INPUT", "Invalid campaign action.");
+  const result = await deleteCampaign(id, identity);
+  if (result.error === "missing") return jsonError("RESOURCE_NOT_FOUND", "Campaign not found.", 404);
+  if (result.error === "running") return jsonError("INVALID_STATE", "Pause the campaign before deleting it.", 409);
+  if (result.error === "claimed") return jsonError("ACTIVE_JOB", "Resolve opened or unconfirmed posts before deleting this campaign.", 409);
+  return jsonSuccess({ deleted: true });
 }

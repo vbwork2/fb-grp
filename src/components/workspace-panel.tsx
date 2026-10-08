@@ -2,7 +2,8 @@
 
 import { T, LocalizedInput, LocalizedTextarea } from "@/components/language-provider";
 import { translateDialog } from "@/lib/i18n";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
+import DeleteCampaignButton from "@/components/delete-campaign-button";
 import { CampaignWizard } from "@/components/campaign-wizard";
 import {
   GroupsIcon,
@@ -177,17 +178,6 @@ export function GroupsPanel({ initialGroups }: { initialGroups: Group[] }) {
 
   return (
     <>
-      {editingGroup && (
-        <GroupEditor
-          group={editingGroup}
-          onClose={() => setEditingGroup(null)}
-          onSaved={(updated) => {
-            setItems((current) => current.map((item) => (item.id === updated.id ? updated : item)));
-            setEditingGroup(null);
-          }}
-        />
-      )}
-
       {/* Add Group & CSV Import Panel */}
       <div className="panel">
         <div className="panel-head">
@@ -362,7 +352,8 @@ export function GroupsPanel({ initialGroups }: { initialGroups: Group[] }) {
               </thead>
               <tbody>
                 {visible.map((group) => (
-                  <tr key={group.id}>
+                  <Fragment key={group.id}>
+                  <tr>
                     <td>
                       <LocalizedInput
                         aria-label={`Select ${group.name}`}
@@ -422,7 +413,9 @@ export function GroupsPanel({ initialGroups }: { initialGroups: Group[] }) {
                         <button
                           type="button"
                           className="button small"
-                          onClick={() => setEditingGroup(group)}
+                          aria-expanded={editingGroup?.id === group.id}
+                          aria-controls={`group-editor-${group.id}`}
+                          onClick={() => setEditingGroup(editingGroup?.id === group.id ? null : group)}
                           title="Edit group"
                         >
                           <EditIcon className="w-3 h-3 text-slate-500" />
@@ -449,6 +442,19 @@ export function GroupsPanel({ initialGroups }: { initialGroups: Group[] }) {
                       </div>
                     </td>
                   </tr>
+                  {editingGroup?.id === group.id && (
+                    <tr id={`group-editor-${group.id}`}>
+                      <td colSpan={7}>
+                        <GroupEditor key={group.id} group={editingGroup}
+                          onClose={() => setEditingGroup(null)}
+                          onSaved={(updated) => {
+                            setItems((current) => current.map((item) => item.id === updated.id ? updated : item));
+                            setEditingGroup(null);
+                          }} />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -550,9 +556,15 @@ function GroupEditor({
   );
 }
 
-export function ContentPanel({ initialContents }: { initialContents: Content[] }) {
+export function ContentPanel({ initialContents, initialMedia = {} }: { initialContents: Content[]; initialMedia?: Record<string, MediaItem[]> }) {
   const [items, setItems] = useState(initialContents);
-  const [uploads, setUploads] = useState<Record<string, MediaItem[]>>({});
+  const [uploads, setUploads] = useState<Record<string, MediaItem[]>>(initialMedia);
+  const [uploadFeedbackId, setUploadFeedbackId] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const [pendingImages, setPendingImages] = useState<Record<string, File[]>>({});
+  const [deletingImageId, setDeletingImageId] = useState<string | null>(null);
+  const [contentSaving, setContentSaving] = useState(false);
+  const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [editingContent, setEditingContent] = useState<Content | null>(null);
@@ -588,7 +600,8 @@ export function ContentPanel({ initialContents }: { initialContents: Content[] }
 
   async function add(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy) return;
+    if (busy || contentSaving || deletingImageId || uploadingId) return;
+    setUploadFeedbackId(null);
     setError("");
     setSuccess("");
     const formElement = event.currentTarget;
@@ -625,6 +638,7 @@ export function ContentPanel({ initialContents }: { initialContents: Content[] }
   }
 
   async function remove(id: string) {
+    setUploadFeedbackId(null);
     try {
       await request(`/api/content/${id}`, undefined, "DELETE");
       setItems((current) => current.filter((item) => item.id !== id));
@@ -634,6 +648,7 @@ export function ContentPanel({ initialContents }: { initialContents: Content[] }
   }
 
   async function duplicate(item: Content) {
+    setUploadFeedbackId(null);
     try {
       const copy = await request<Content>("/api/content", {
         name: `${item.name} copy`,
@@ -648,36 +663,47 @@ export function ContentPanel({ initialContents }: { initialContents: Content[] }
     }
   }
 
-  async function uploadImage(contentId: string, event: React.ChangeEvent<HTMLInputElement>) {
-    const inputElement = event.currentTarget;
-    const file = inputElement.files?.[0];
-    if (!file) return;
+  async function uploadImages(contentId: string, selected: File[]) {
+    if (uploadingId || busy || contentSaving || deletingImageId || !selected.length) return;
     setError("");
     setSuccess("");
+    setUploadingId(contentId);
+    setUploadFeedbackId(contentId);
     try {
-      validateFiles([file]);
-      await attachImage(contentId, file);
-      setSuccess("Image uploaded and attached to this content.");
+      validateFiles(selected);
+      setPendingImages((current) => ({ ...current, [contentId]: selected }));
+      for (const file of selected) {
+        await attachImage(contentId, file);
+        setPendingImages((current) => ({ ...current, [contentId]: (current[contentId] ?? []).filter((entry) => entry !== file) }));
+      }
+      setSuccess("Images uploaded and attached to this content.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to upload image.");
     } finally {
-      inputElement.value = "";
+      setUploadingId(null);
+    }
+  }
+
+  async function removeImage(contentId: string, image: MediaItem) {
+    if (busy || contentSaving || uploadingId || deletingImageId) return;
+    if (!window.confirm(`${translateDialog("Delete this image from the content?")}\n${image.originalFilename}`)) return;
+    setDeletingImageId(image.id);
+    setUploadFeedbackId(contentId);
+    setError("");
+    setSuccess("");
+    try {
+      await request(`/api/media/${image.id}`, undefined, "DELETE");
+      setUploads((current) => ({ ...current, [contentId]: (current[contentId] ?? []).filter((entry) => entry.id !== image.id) }));
+      setSuccess("Image deleted.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to delete image. Try again.");
+    } finally {
+      setDeletingImageId(null);
     }
   }
 
   return (
     <>
-      {editingContent && (
-        <ContentEditor
-          content={editingContent}
-          onClose={() => setEditingContent(null)}
-          onSaved={(updated) => {
-            setItems((current) => current.map((item) => (item.id === updated.id ? updated : item)));
-            setEditingContent(null);
-          }}
-        />
-      )}
-
       {/* Create Content Panel */}
       <div className="panel">
         <div className="panel-head">
@@ -690,7 +716,7 @@ export function ContentPanel({ initialContents }: { initialContents: Content[] }
         </div>
         <form className="form p-5" onSubmit={add}>
           <fieldset
-            disabled={busy}
+            disabled={busy || contentSaving || deletingImageId !== null || uploadingId !== null}
             className="form"
             style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}
           >
@@ -759,6 +785,7 @@ export function ContentPanel({ initialContents }: { initialContents: Content[] }
                   {"Choose JPG, PNG, or WebP images. They will be uploaded when you save content."}
                 </T>
               </p>
+              {files.length > 0 && <p className="muted text-sm" role="status">{files.length}<T>{" images selected"}</T></p>}
               {files.length > 0 && (
                 <div className="flex flex-wrap gap-2 pt-1">
                   {files.map((file, index) => (
@@ -785,7 +812,7 @@ export function ContentPanel({ initialContents }: { initialContents: Content[] }
               </button>
             </div>
           </fieldset>
-          <Feedback error={error} success={success} />
+          <Feedback error={uploadFeedbackId !== null && detailId === uploadFeedbackId ? "" : error} success={uploadFeedbackId !== null && detailId === uploadFeedbackId ? "" : success} />
         </form>
       </div>
 
@@ -820,17 +847,29 @@ export function ContentPanel({ initialContents }: { initialContents: Content[] }
           <div className="divide-y divide-slate-100">
             {items.map((item) => {
               const expanded = expandedVariants.includes(item.id);
+              const detailsOpen = detailId === item.id;
+              const remainingImages = pendingImages[item.id] ?? [];
               const mediaForContent = uploads[item.id] ?? [];
               return (
                 <article key={item.id} className="p-6 hover:bg-slate-50/40 transition-colors">
-                  <div className="row mb-3">
-                    <strong className="text-base font-semibold text-slate-900">{item.name}</strong>
-                    <div className="buttons">
+                  <div className="row mb-3" style={{ flexWrap: "wrap" }}>
+                    <div className="min-w-0" style={{ overflowWrap: "anywhere" }}>
+                      <strong className="text-base font-semibold text-slate-900">{item.name}</strong>
+                      <p className="muted text-sm mt-1 mb-0" aria-live="polite">{mediaForContent.length}<T>{" images uploaded"}</T></p>
+                    </div>
+                    <button type="button" className="button small" disabled={contentSaving} aria-expanded={detailsOpen}
+                      aria-controls={`content-details-${item.id}`}
+                      onClick={() => setDetailId(detailsOpen ? null : item.id)}>
+                      <T>{detailsOpen ? "Hide details" : "Details"}</T>
+                    </button>
+                  </div>
+                  <div id={`content-details-${item.id}`} hidden={!detailsOpen}>
+                    <div className="buttons" style={{ flexWrap: "wrap" }}>
                       <button
                         type="button"
                         className="button small"
-                        disabled={busy || pendingContentId === item.id}
-                        onClick={() => setEditingContent(item)}
+                        disabled={busy || contentSaving || deletingImageId !== null || uploadingId !== null || pendingContentId === item.id || editingContent?.id === item.id}
+                        onClick={() => { setEditingContent(item); setUploadFeedbackId(null); setError(""); setSuccess(""); }}
                         title="Edit content"
                       >
                         <EditIcon className="w-3 h-3 text-slate-500" />
@@ -839,6 +878,7 @@ export function ContentPanel({ initialContents }: { initialContents: Content[] }
                       <button
                         type="button"
                         className="button small"
+                        disabled={busy || contentSaving || deletingImageId !== null || uploadingId !== null || pendingContentId === item.id}
                         onClick={() => void duplicate(item)}
                         title="Duplicate content"
                       >
@@ -848,7 +888,7 @@ export function ContentPanel({ initialContents }: { initialContents: Content[] }
                       <button
                         type="button"
                         className="button small danger"
-                        disabled={busy || pendingContentId === item.id}
+                        disabled={busy || contentSaving || deletingImageId !== null || uploadingId !== null || pendingContentId === item.id}
                         onClick={() => void remove(item.id)}
                         title="Delete content"
                       >
@@ -856,12 +896,23 @@ export function ContentPanel({ initialContents }: { initialContents: Content[] }
                         <span><T>{"Delete"}</T></span>
                       </button>
                     </div>
-                  </div>
 
+
+                  {editingContent?.id === item.id ? (
+                    <ContentEditor key={item.id} content={editingContent}
+                      onClose={() => setEditingContent(null)} onBusyChange={setContentSaving}
+                      onSaved={(updated) => {
+                        setItems((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
+                        setEditingContent(null);
+                        setUploadFeedbackId(item.id);
+                        setError("");
+                        setSuccess("Content updated.");
+                      }} />
+                  ) : (
                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 my-3">
                     <p
                       className="text-slate-800 text-sm m-0 leading-relaxed font-normal"
-                      style={{ whiteSpace: "pre-wrap" }}
+                      style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
                     >
                       {item.body}
                     </p>
@@ -875,36 +926,38 @@ export function ContentPanel({ initialContents }: { initialContents: Content[] }
                     )}
                   </div>
 
-                  <div className="flex items-center gap-2 flex-wrap my-3">
-                    <label
-                      className="button small"
-                      htmlFor={`image-${item.id}`}
-                      title="Attach image to this content"
-                    >
-                      <UploadIcon className="w-3 h-3 text-slate-500" />
-                      <span><T>{"Upload image"}</T></span>
-                    </label>
-                    <input
-                      id={`image-${item.id}`}
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp"
-                      onChange={(event) => void uploadImage(item.id, event)}
-                      style={{ display: "none" }}
-                    />
+                  )}
+                  {uploadFeedbackId === item.id && <Feedback error={error} success={success} />}
+                  <div className="field my-3">
+                    <label htmlFor={`image-${item.id}`}><T>{"Upload images"}</T></label>
+                    <input id={`image-${item.id}`} type="file" accept="image/jpeg,image/png,image/webp" multiple
+                      disabled={busy || contentSaving || deletingImageId !== null || uploadingId !== null || remainingImages.length > 0 || pendingContentId === item.id}
+                      onChange={(event) => { const selected = [...(event.currentTarget.files ?? [])]; event.currentTarget.value = ""; void uploadImages(item.id, selected); }} />
+                    <p className="muted text-xs"><T>{"Choose JPG, PNG, or WebP images."}</T></p>
+                    {uploadingId === item.id && <p role="status"><T>{"Uploading images…"}</T> {remainingImages.length}<T>{" remaining"}</T></p>}
+                    {remainingImages.length > 0 && uploadingId !== item.id && <div className="notice">
+                      <p>{remainingImages.length}<T>{" images waiting to upload"}</T></p>
+                      <p className="text-sm" style={{ overflowWrap: "anywhere" }}>{remainingImages.map((file) => file.name).join(", ")}</p>
+                      <button type="button" className="button small" disabled={busy || contentSaving || deletingImageId !== null || uploadingId !== null} onClick={() => void uploadImages(item.id, remainingImages)}><T>{"Retry remaining images"}</T></button>
+                      <button type="button" className="button small" disabled={busy || contentSaving || deletingImageId !== null || uploadingId !== null} onClick={() => setPendingImages((current) => ({ ...current, [item.id]: [] }))}><T>{"Clear selection"}</T></button>
+                    </div>}
+                  </div>
+                  <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 160px), 1fr))" }}>
                     {mediaForContent.map((image) => (
-                      <a
-                        key={image.id}
-                        href={`/api/media/${image.id}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 text-xs text-slate-600 bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-md border border-slate-200 transition-colors"
-                      >
-                        <span>{image.originalFilename}</span>
-                        <span className="text-slate-400">
-                          ({Math.ceil(image.sizeBytes / 1024)}
-                          <T>{" KB)"}</T>)
-                        </span>
-                      </a>
+                      <div key={image.id} className="border border-slate-200 rounded-lg overflow-hidden bg-white min-w-0">
+                        <a href={`/api/media/${image.id}`} target="_blank" rel="noreferrer">
+                        {/* Stored images use the authenticated media endpoint rather than an external image loader. */}
+                        {detailsOpen && <img src={`/api/media/${image.id}`} alt={image.originalFilename} loading="lazy" className="w-full object-contain bg-slate-50" style={{ height: 140 }} />}
+                        <div className="p-2 text-xs" style={{ overflowWrap: "anywhere" }}>{image.originalFilename}<p className="muted m-0">{Math.ceil(image.sizeBytes / 1024)} KB</p></div>
+                        </a>
+                        <div className="p-2 pt-0">
+                          <button type="button" className="button small danger"
+                            disabled={busy || contentSaving || uploadingId !== null || deletingImageId !== null || pendingContentId === item.id}
+                            onClick={() => void removeImage(item.id, image)}>
+                            <T>{deletingImageId === image.id ? "Deleting image…" : "Delete image"}</T>
+                          </button>
+                        </div>
+                      </div>
                     ))}
                   </div>
 
@@ -928,6 +981,7 @@ export function ContentPanel({ initialContents }: { initialContents: Content[] }
                       </div>
                     )}
                   </div>
+                  </div>
                 </article>
               );
             })}
@@ -942,17 +996,21 @@ function ContentEditor({
   content,
   onClose,
   onSaved,
+  onBusyChange,
 }: {
   content: Content;
   onClose: () => void;
   onSaved: (content: Content) => void;
+  onBusyChange: (busy: boolean) => void;
 }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (busy) return;
     setBusy(true);
+    onBusyChange(true);
     setError("");
     const values = Object.fromEntries(new FormData(event.currentTarget).entries());
     try {
@@ -961,11 +1019,12 @@ function ContentEditor({
       setError(cause instanceof Error ? cause.message : "Unable to update content.");
     } finally {
       setBusy(false);
+      onBusyChange(false);
     }
   }
 
   return (
-    <div className="panel border-blue-200 shadow-md">
+    <div className="panel border-blue-200 shadow-md mt-3">
       <div className="panel-head bg-blue-50/50">
         <div className="flex items-center gap-2">
           <EditIcon className="w-4 h-4 text-blue-600" />
@@ -973,12 +1032,13 @@ function ContentEditor({
             <T>{"Edit content"}</T>
           </h2>
         </div>
-        <button type="button" className="button small" onClick={onClose}>
+        <button type="button" className="button small" disabled={busy} onClick={onClose}>
           <CloseIcon className="w-3.5 h-3.5" />
           <span><T>{"Close"}</T></span>
         </button>
       </div>
       <form className="form p-5" onSubmit={submit}>
+        <fieldset disabled={busy} className="form" style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
         <div className="field">
           <label htmlFor="editContentName">
             <T>{"Content name"}</T>
@@ -1029,6 +1089,7 @@ function ContentEditor({
         >
           <T>{busy ? "Saving…" : "Save changes"}</T>
         </button>
+        </fieldset>
       </form>
     </div>
   );
@@ -1364,6 +1425,7 @@ export function CampaignsPanel({
                     </td>
                     <td>
                       <div className="flex items-center justify-end gap-2">
+                        <DeleteCampaignButton id={campaign.id} name={campaign.name} disabled={campaign.status === "RUNNING"} onDeleted={() => { setItems((current) => current.filter((entry) => entry.campaign.id !== campaign.id)); setSuccess("Campaign deleted."); }} />
                         {campaign.status === "READY" ? (
                           <button
                             type="button"

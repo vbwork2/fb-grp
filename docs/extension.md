@@ -1,18 +1,18 @@
-# Groupflow Chrome Extension — assisted Facebook Group campaigns
+# Groupflow Chrome Extension — Facebook Group campaign modes
 
 ## Setup
 
 1. Build from this branch with `npm run extension:build` and load `extension/dist` at `chrome://extensions` (Developer mode).
 2. Pair the extension with Groupflow using a one-time device code from web Settings.
 3. Sign in to Facebook **directly in Chrome**. Groupflow never needs your Facebook password, cookies or 2FA codes.
-4. Select a campaign from the extension and press **Start preparing posts**. There is no fixed three-group cap; posting intervals still apply.
+4. Select a campaign and choose **Automatically click Post** (default off). Press **Start preparing posts** when off or **Start automatic posting** when on. There is no fixed three-group cap; posting intervals still apply.
 
 ## How a campaign proceeds
 
 1. Extension opens each scheduled Facebook Group and the **Bạn viết gì đi / Write something** composer.
 2. Extension inserts caption with preserved line breaks, attaches configured images, waits for previews and confirms the editor looks ready.
-3. **You review the post and click Đăng / Post inside Facebook yourself.** Groupflow does **not** click this button in assisted mode.
-4. Only after an actual user click, the extension waits for a fresh, recognizable Facebook publication confirmation. On confirmed success, it records history and opens the next group once due.
+3. With **Automatically click Post** off, review and click Post inside Facebook. With it on, the extension clicks Post after validating the caption, images, group and enabled button. Stop monitoring and resolve any pending submission before changing modes.
+4. Only after an actual click, the extension waits for a fresh, recognizable Facebook publication confirmation. On confirmed success, it records history and opens the next group once due.
 5. A notice that the post is awaiting administrator approval, or an ambiguous/missing publication notice, pauses automation. Check Facebook first. If you can clearly verify that the post has actually been published, click **I verified this post is published** in the extension to record it and continue. Otherwise keep it pending for review.
 
 ## Controls and recovery
@@ -34,3 +34,9 @@ The web app can also cancel a campaign. Neither cancel nor reset can retract pos
 - You can run checks locally with `npm run typecheck`, `npm run test`, `npm run extension:build` and `npx playwright test e2e/facebook-adapter.spec.ts`.
 
 API traffic goes through the extension service worker. Facebook authentication stays in the user's own Chrome session.
+
+## Repair and verification details
+
+The new explicit switch persists as autoClickPost and defaults off. Legacy autoPublish preferences remain ignored. Actual clicks have a separate audit event with user/automatic source; a reservation alone is not a click. After a worker restart or lost watcher, the extension pauses for review rather than submitting again. Failed/skip operations cannot unlock an uncertain submission. Local preview bytes or identical decoded pixels are matched to each selected file; lossless re-encoding or an identical browser resize is supported. Automatic mode blocks different or uncertain images. A preview may switch from a captured, matched local upload source to a CDN source on the same image element if no trusted image edits occurred. Untracked CDN previews require review. Manual mode prepares the caption and images but shows a review warning instead of blocking on preview identity; only the user clicks Post.
+
+Run `npx playwright test e2e/facebook-adapter.spec.ts e2e/automatic-extension.spec.ts` to verify controlled DOM plus the actual unpacked popup/worker. See [repair report](repair-report.md) for this run and limitations.

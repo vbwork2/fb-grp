@@ -2,6 +2,10 @@
 
 Date: 2026-10-08. Runtime: Windows 11, Node.js 24, local Next.js server connected to Neon PostgreSQL.
 
+## Historical verification
+
+The tables below describe an earlier run, not the current repair. Current results and blockers are in [repair-report.md](repair-report.md).
+
 ## Commands
 
 | Check | Result |
@@ -25,7 +29,7 @@ Date: 2026-10-08. Runtime: Windows 11, Node.js 24, local Next.js server connecte
 | Queue | Concurrent device claims, future jobs, paused campaigns, stale claims, posted/skipped/failed outcomes, incomplete jobs prevent premature completion |
 | History | Outcome records and CSV export |
 | Devices | Pair expiry, single use, revocation, expiry, disabled account and workspace isolation |
-| Extension | Background worker unit checks and real Chromium extension loading/pairing/job navigation/copy/preparation/media/reporting/revocation; automatic image posting across two selected groups; three-attempt limit; oversized campaign rejection; Stop and uncertain outcome protection |
+| Extension | Background worker unit checks and real Chromium extension loading/pairing/job navigation/copy/preparation/media/reporting/revocation; default assisted preparation, opt-in automatic Post across controlled groups, persisted mode selection, and trusted user-click verification; Stop and uncertain outcome protection |
 | Facebook adapter | Controlled composer, missing composer, verification screen, preparation never posts; explicit publish clicks once; wrong group, disabled and ambiguous buttons rejected; edited captions preserved; image previews, fresh publication notices, approval and cancellation |
 | Durable submissions | Foreign campaign/submission rejection, reservation before click, repeated begin rejected, release after no click, expired AWAITING_CONFIRMATION jobs cannot be reclaimed |
 | Database | PostgreSQL migrations in a disposable schema; seed runs twice with unchanged counts |
@@ -53,10 +57,10 @@ Live acceptance tests create temporary accounts and a disposable schema, then cl
 ## Posting repair verification
 
 - Removed duplicate translation keys that caused TS1117 and blocked builds.
-- Manual extension publishing now reserves AWAITING_CONFIRMATION on the server before clicking Facebook, matching the automatic flow. A no-click response releases the reservation; a failed release keeps the local attempt locked.
+- Manual extension publishing now reserves AWAITING_CONFIRMATION on the server before clicking Facebook, matching the reservation flow. A no-click response releases the reservation; a failed release keeps the local attempt locked.
 - The adapter waits for delayed composer rendering and checks cancellation before opening a newly rendered trigger or filling the editor.
 - Typecheck, lint, 48 unit tests, production build, extension build and 23 live acceptance tests passed. The final adapter build also passed all 17 targeted browser tests.
-- Chromium acceptance verified automatic image attachment, publication confirmation, history and completion across two controlled Facebook Group pages. No post was sent to real Facebook.
+- Chromium acceptance verified image attachment, publication confirmation, history and completion across two controlled Facebook Group pages. No post was sent to real Facebook.
 - Reload the unpacked extension from extension/dist and reload Facebook tabs before using the repaired build.
 
 ## Remaining checks and scope

@@ -2,7 +2,7 @@ import { translate, type Locale } from "../../../src/lib/i18n";
 export {};
 
 type Job = { id: string; publishAttempted?: boolean; campaign: string; group: { name: string; url: string }; content: { caption: string; linkUrl: string | null; media: { id: string; filename: string; mimeType: string }[] } };
-type AutomaticRun = { runId: string; campaignId: string; enabled: boolean; status: string; error?: string; attempts: number; tabId?: number; groupName?: string; phase: "WAITING" | "OPENING" | "PREPARING" | "AWAITING_USER" | "VERIFYING" | "PAUSED" };
+type AutomaticRun = { runId: string; campaignId: string; enabled: boolean; status: string; error?: string; errorCode?: string; attempts: number; autoClickPost?: boolean; tabId?: number; groupName?: string; phase: "WAITING" | "OPENING" | "PREPARING" | "AWAITING_USER" | "VERIFYING" | "PAUSED" };
 type Campaign = { id: string; name: string; status: string; groupCount: number; failedCount: number };
 
 const byId = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -24,6 +24,7 @@ let currentStatus = "";
 let currentAutomatic: AutomaticRun | undefined;
 let campaigns: Campaign[] = [];
 let sending = false;
+let autoClickPost = false;
 const t = (value: string) => translate(value, locale);
 
 function setStatus(value: string) {
@@ -76,7 +77,9 @@ function showJob(job?: Job, connected = Boolean(job)) {
     byId<HTMLButtonElement>("copy").onclick = async () => { await navigator.clipboard.writeText(caption.textContent ?? ""); setStatus("Caption copied."); };
     byId<HTMLButtonElement>("prepare").onclick = () => void send({ type: "PREPARE" });
     byId<HTMLButtonElement>("publish").onclick = () => void send({ type: "PUBLISH", jobId: job.id, mediaConfirmed: byId<HTMLInputElement>("imagesAttached").checked });
-    byId<HTMLButtonElement>("posted").onclick = () => void send({ type: "POSTED" }, true);
+    byId<HTMLButtonElement>("posted").onclick = () => {
+      if (window.confirm(t("Have you checked Facebook and verified that this post is published?"))) void send({ type: "POSTED" }, true);
+    };
     byId<HTMLButtonElement>("skip").onclick = () => void send({ type: "SKIP" }, true);
     byId<HTMLButtonElement>("failed").onclick = () => void send({ type: "FAILED" }, true);
   }
@@ -84,6 +87,10 @@ function showJob(job?: Job, connected = Boolean(job)) {
 }
 
 function renderAutomatic() {
+  byId<HTMLButtonElement>("autoStart").textContent = t(autoClickPost ? "Start automatic posting" : "Start preparing posts");
+  byId<HTMLInputElement>("autoClickPost").checked = autoClickPost;
+  byId<HTMLInputElement>("autoClickPost").disabled = sending || Boolean(currentAutomatic?.enabled) || Boolean(currentJob?.publishAttempted);
+  byId<HTMLElement>("autoHelp").textContent = t(autoClickPost ? "On: posts are published automatically, then the next scheduled group opens." : "Off: review each prepared post and click Post on Facebook.");
   const run = currentAutomatic;
   const running = Boolean(run?.enabled);
   const paused = Boolean(run && !run.enabled && run.phase === "PAUSED");
@@ -97,7 +104,7 @@ function renderAutomatic() {
   byId<HTMLButtonElement>("autoStop").disabled = sending || !running;
   byId<HTMLButtonElement>("autoRetry").classList.toggle("hidden", !failed || Boolean(currentJob?.publishAttempted) || Boolean(selectedCampaign?.failedCount));
   byId<HTMLButtonElement>("autoRetry").disabled = sending;
-  const postPending = Boolean(currentJob?.publishAttempted && run &&
+  const postPending = Boolean(currentJob?.publishAttempted && run && (!run.autoClickPost || run.phase === "PAUSED") &&
     currentJob && ["AWAITING_USER", "VERIFYING", "PAUSED"].includes(run.phase));
   byId<HTMLButtonElement>("autoConfirm").classList.toggle("hidden", !postPending);
   byId<HTMLButtonElement>("autoConfirm").disabled = sending;
@@ -112,7 +119,7 @@ function renderAutomatic() {
   const state = byId<HTMLElement>("autoState");
   state.classList.toggle("running", running);
   state.classList.toggle("error", failed);
-  byId<HTMLElement>("autoStateLabel").textContent = running ? t("RUNNING") : failed ? t("NEEDS ATTENTION") : t("READY");
+  byId<HTMLElement>("autoStateLabel").textContent = run?.status === "Automatic posting completed." ? t("COMPLETED") : running ? t("RUNNING") : failed ? t("NEEDS ATTENTION") : t("READY");
   const title = !run ? "Ready to post" : failed ? "Posting paused — action needed" : running
     ? run.phase === "OPENING" ? "Opening Facebook Group"
       : run.phase === "PREPARING" ? "Preparing the post"
@@ -123,6 +130,7 @@ function renderAutomatic() {
   byId<HTMLElement>("autoStatusTitle").textContent = t(title);
   const details = run ? [run.groupName, run.error || run.status, `${t("Prepared")}: ${run.attempts}`].filter(Boolean).map((value) => t(String(value))).join(" · ") : t("Choose a campaign and press Start posting.");
   byId<HTMLElement>("automaticStatus").textContent = details;
+  byId<HTMLElement>("debugErrorCode").textContent = run?.errorCode ?? "";
   const step = running ? run!.phase === "OPENING" ? 1 : run!.phase === "PREPARING" ? 2 :
     ["AWAITING_USER", "VERIFYING"].includes(run!.phase) ? 3 : 0 : 0;
   for (let index = 1; index <= 3; index++) {
@@ -132,11 +140,11 @@ function renderAutomatic() {
   }
   byId<HTMLButtonElement>("autoOpen").classList.toggle("hidden", !run?.tabId);
   for (const id of ["next", "prepare", "publish", "posted", "skip", "failed", "disconnect"]) {
-    byId<HTMLButtonElement>(id).disabled = running || sending || (["next", "publish"].includes(id) && Boolean(currentJob?.publishAttempted));
+    byId<HTMLButtonElement>(id).disabled = running || sending || (["next", "publish", "skip", "failed"].includes(id) && Boolean(currentJob?.publishAttempted));
   }
 }
 
-async function send(message: { type: string; apiUrl?: string; code?: string; jobId?: string; mediaConfirmed?: boolean; campaignId?: string }, clear = false) {
+async function send(message: { type: string; enabled?: boolean; apiUrl?: string; code?: string; jobId?: string; mediaConfirmed?: boolean; campaignId?: string }, clear = false) {
   if (sending) return;
   sending = true;
   setStatus(message.type === "AUTO_START" ? "Starting automation…" : "");
@@ -197,7 +205,8 @@ async function refreshCampaigns() {
   }
 }
 
-void chrome.storage.local.get(["apiUrl", "deviceToken", "job", "locale", "automatic"]).then((saved) => {
+void chrome.storage.local.get(["apiUrl", "deviceToken", "job", "locale", "automatic", "autoClickPost"]).then((saved) => {
+  autoClickPost = saved.autoClickPost === true;
   locale = saved.locale === "en" ? "en" : "vi";
   apiUrl.value = String(saved.apiUrl ?? "");
   currentAutomatic = saved.automatic as AutomaticRun | undefined;
@@ -215,6 +224,12 @@ byId<HTMLSelectElement>("language").onchange = async (event) => {
   renderLanguage();
   showJob(currentJob, currentConnected);
   await refreshCampaigns();
+};
+byId<HTMLInputElement>("autoClickPost").onchange = async (event) => {
+  autoClickPost = (event.target as HTMLInputElement).checked;
+  await send({ type: "AUTO_SET_PUBLISH", enabled: autoClickPost });
+  autoClickPost = (await chrome.storage.local.get("autoClickPost")).autoClickPost === true;
+  renderAutomatic();
 };
 byId<HTMLSelectElement>("autoCampaign").onchange = () => renderAutomatic();
 byId<HTMLButtonElement>("autoRefresh").onclick = () => void refreshCampaigns();
@@ -244,7 +259,13 @@ byId<HTMLButtonElement>("autoOpen").onclick = async () => {
 };
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
-  if (changes.automatic) currentAutomatic = changes.automatic.newValue as AutomaticRun | undefined;
+  if (changes.autoClickPost) autoClickPost = changes.autoClickPost.newValue === true;
+  if (changes.automatic) {
+    currentAutomatic = changes.automatic.newValue as AutomaticRun | undefined;
+    // Preparation failures update the server queue before pausing the worker.
+    // Refresh counts so recovery shows Reset failed groups rather than Retry.
+    if (currentAutomatic?.phase === "PAUSED" && currentAutomatic.error) void refreshCampaigns();
+  }
   if (changes.job) showJob(changes.job.newValue as Job | undefined, currentConnected);
   renderAutomatic();
 });

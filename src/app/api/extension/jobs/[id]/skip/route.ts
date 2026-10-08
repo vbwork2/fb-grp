@@ -14,10 +14,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (!device) return jsonError("DEVICE_UNAUTHORIZED", "Device token is invalid, expired, or revoked.", 401);
   const { id } = await context.params;
   const parsed = input.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return jsonError("INVALID_INPUT", "Invalid skip request.");
+  if (!parsed.success || !z.string().uuid().safeParse(id).success) return jsonError("INVALID_INPUT", "Invalid skip request.");
   const result = await db.transaction(async (tx) => {
     const [job] = await tx.select().from(queueItems).where(and(eq(queueItems.id, id), eq(queueItems.workspaceId, device.workspaceId), eq(queueItems.claimToken, parsed.data.claimToken))).limit(1).for("update");
-    if (!job || !["OPENED", "AWAITING_CONFIRMATION"].includes(job.status)) return null;
+    if (!job || job.status !== "OPENED") return null;
     assertQueueTransition(job.status, "SKIPPED");
     const now = new Date();
     await tx.update(queueItems).set({ status: "SKIPPED", completedAt: now, updatedAt: now, claimToken: null, claimedAt: null }).where(eq(queueItems.id, job.id));

@@ -3,6 +3,7 @@
 import { T } from "@/components/language-provider";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import DeleteCampaignButton from "@/components/delete-campaign-button";
 import CampaignEditor from "@/components/campaign-editor";
 import {
   PlayIcon,
@@ -181,6 +182,7 @@ export default function CampaignDetail({
             </h2>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            <DeleteCampaignButton id={campaign.id} name={campaign.name} disabled={busy || status === "RUNNING" || queue.some((item) => ["OPENED", "AWAITING_CONFIRMATION"].includes(item.status))} />
             {status === "READY" && (
               <button
                 type="button"
