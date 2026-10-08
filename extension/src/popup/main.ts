@@ -120,7 +120,7 @@ function renderAutomatic() {
             : "Waiting for scheduled post"
     : run.status === "Automatic posting completed." ? "Posting completed" : "Posting stopped";
   byId<HTMLElement>("autoStatusTitle").textContent = t(title);
-  const details = run ? [run.groupName, run.error || run.status, `${t("Attempts")}: ${run.attempts}/3`].filter(Boolean).map((value) => t(String(value))).join(" · ") : t("Choose a campaign and press Start posting.");
+  const details = run ? [run.groupName, run.error || run.status, `${t("Prepared")}: ${run.attempts}`].filter(Boolean).map((value) => t(String(value))).join(" · ") : t("Choose a campaign and press Start posting.");
   byId<HTMLElement>("automaticStatus").textContent = details;
   const step = running ? run!.phase === "OPENING" ? 1 : run!.phase === "PREPARING" ? 2 :
     ["AWAITING_USER", "VERIFYING"].includes(run!.phase) ? 3 : 0 : 0;
