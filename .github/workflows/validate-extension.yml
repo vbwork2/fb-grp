@@ -1,0 +1,35 @@
+name: Validate Groupflow posting workflow
+on:
+  pull_request:
+    paths:
+      - "extension/**"
+      - "src/app/api/extension/**"
+      - "src/lib/i18n/**"
+      - "tests/**"
+      - "e2e/facebook-adapter.spec.ts"
+      - "e2e/live-workflow.spec.ts"
+      - ".github/workflows/validate-extension.yml"
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install web dependencies
+        run: npm ci
+      - name: Install extension dependencies
+        run: npm --prefix extension ci
+      - name: Check server-side types
+        run: npm run typecheck
+      - name: Run unit tests
+        run: npm run test
+      - name: Build Chrome extension
+        run: npm run extension:build
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Test Facebook adapter on controlled UI
+        run: npx playwright test e2e/facebook-adapter.spec.ts --project=chromium
