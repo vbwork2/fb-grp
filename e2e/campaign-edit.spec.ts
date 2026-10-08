@@ -23,12 +23,14 @@ test("campaign editor adds, edits and removes groups and replaces content", asyn
     userId = user.id; workspaceId = user.workspaceId;
     const content = await data(await actor.post("/api/content", { data: { name: "Original content", body: "Original caption" } }), 201);
     const first = await data(await actor.post("/api/groups", { data: { name: "Original group", facebookUrl: `https://www.facebook.com/groups/edit-${run}/` } }), 201);
-    const campaign = await data(await actor.post("/api/campaigns", { data: { name: "Editable campaign", contentId: content.id, groupIds: [first.id], minIntervalSeconds: 60, maxIntervalSeconds: 60 } }), 201);
+    const campaign = await data(await actor.post("/api/campaigns", { data: { name: "Editable campaign", contentId: content.id, groupIds: [first.id], minIntervalSeconds: 2, maxIntervalSeconds: 2 } }), 201);
     await page.context().addCookies((await actor.storageState()).cookies);
     await page.goto(`/campaigns/${campaign.id}`);
     await page.locator("#app-language").selectOption("en");
     await page.getByRole("button", { name: "Edit campaign", exact: true }).click();
     await page.locator("#editCampaignName").fill("Updated campaign");
+    await page.locator("#editCampaignMin").fill("2");
+    await page.locator("#editCampaignMax").fill("100000");
     await page.getByRole("button", { name: "Remove selected content", exact: true }).click();
     await page.locator("#campaignContentName").fill("New campaign content");
     await page.locator("#campaignContentBody").fill("New caption");
@@ -48,6 +50,9 @@ test("campaign editor adds, edits and removes groups and replaces content", asyn
     await Promise.all([page.waitForEvent("load"), page.getByRole("button", { name: "Save campaign changes", exact: true }).click()]);
     await expect(page.getByRole("heading", { name: "Updated campaign", exact: true })).toBeVisible();
     await expect(page.getByText("New caption", { exact: true })).toBeVisible();
+    const [intervals] = await sql`select min_interval_seconds, max_interval_seconds from campaigns where id=${campaign.id}`;
+    expect(intervals.min_interval_seconds).toBe(2);
+    expect(intervals.max_interval_seconds).toBe(100000);
     const selected = await sql`select g.name from campaign_groups cg join groups g on g.id=cg.group_id where cg.campaign_id=${campaign.id}`;
     expect(selected.map((group) => group.name)).toEqual(["New group"]);
     expect((await sql`select name from groups where id=${first.id}`)[0].name).toBe("Renamed original group");

@@ -277,7 +277,7 @@ export const vietnamese: Record<string, string> = {
   "Create campaign": "Tạo chiến dịch",
   "Enter a campaign name and choose content.": "Nhập tên chiến dịch và chọn nội dung.",
   "Select at least one active group.": "Chọn ít nhất một nhóm đang hoạt động.",
-  "Use intervals of at least 60 seconds, with maximum at or above minimum.": "Khoảng cách ít nhất 60 giây; mức tối đa phải lớn hơn hoặc bằng mức tối thiểu.",
+  "Use intervals of at least 2 seconds, with maximum at or above minimum.": "Khoảng cách ít nhất 2 giây; mức tối đa phải lớn hơn hoặc bằng mức tối thiểu.",
   "Review the selected content, groups, schedule, and queue progress.": "Xem lại nội dung, nhóm, lịch và tiến trình hàng đợi đã chọn.",
   "Campaign status": "Trạng thái chiến dịch",
   "Posted": "Đã đăng",

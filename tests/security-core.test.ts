@@ -77,8 +77,17 @@ describe("queue planning", () => {
 
   it("requires variants for round robin and honors a future schedule start", () => {
     const future = new Date("2026-01-01T01:00:00.000Z");
-    expect(() => buildQueuePlan({ workspaceId: "workspace", campaignId: "campaign", groups: [], scheduledStartAt: null, minIntervalSeconds: 1, maxIntervalSeconds: 2, strategy: "ROUND_ROBIN", variantIds: [] })).toThrow(/variant/);
-    const plan = buildQueuePlan({ workspaceId: "workspace", campaignId: "campaign", groups: [{ groupId: "group-1", position: 0 }], scheduledStartAt: future, minIntervalSeconds: 1, maxIntervalSeconds: 2, strategy: "PRIMARY_ONLY", variantIds: [], now: new Date("2026-01-01T00:00:00.000Z") });
+    expect(() => buildQueuePlan({ workspaceId: "workspace", campaignId: "campaign", groups: [], scheduledStartAt: null, minIntervalSeconds: 2, maxIntervalSeconds: 2, strategy: "ROUND_ROBIN", variantIds: [] })).toThrow(/variant/);
+    const plan = buildQueuePlan({ workspaceId: "workspace", campaignId: "campaign", groups: [{ groupId: "group-1", position: 0 }], scheduledStartAt: future, minIntervalSeconds: 2, maxIntervalSeconds: 2, strategy: "PRIMARY_ONLY", variantIds: [], now: new Date("2026-01-01T00:00:00.000Z") });
     expect(plan[0].scheduledAt).toEqual(future);
   });
+});
+
+it("schedules posts two seconds apart and accepts intervals above one day", () => {
+  const input = { workspaceId: "workspace", campaignId: "campaign", groups: [0, 1].map((position) => ({ groupId: `group-${position}`, position })), scheduledStartAt: null, strategy: "PRIMARY_ONLY" as const, variantIds: [], now: new Date("2026-10-08T00:00:00Z") };
+  const fast = buildQueuePlan({ ...input, minIntervalSeconds: 2, maxIntervalSeconds: 2 });
+  expect(fast[1].scheduledAt.getTime() - fast[0].scheduledAt.getTime()).toBe(2000);
+  const long = buildQueuePlan({ ...input, minIntervalSeconds: 100000, maxIntervalSeconds: 100000 });
+  expect(long[1].scheduledAt.getTime() - long[0].scheduledAt.getTime()).toBe(100000000);
+  expect(() => buildQueuePlan({ ...input, minIntervalSeconds: 1, maxIntervalSeconds: 2 })).toThrow(/interval/);
 });

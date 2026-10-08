@@ -14,7 +14,7 @@ export function buildQueuePlan(input: {
   variantIds: string[];
   now?: Date;
 }) {
-  if (!Number.isInteger(input.minIntervalSeconds) || !Number.isInteger(input.maxIntervalSeconds) || input.minIntervalSeconds < 0 || input.minIntervalSeconds > input.maxIntervalSeconds) {
+  if (!Number.isInteger(input.minIntervalSeconds) || !Number.isInteger(input.maxIntervalSeconds) || input.minIntervalSeconds < 2 || input.minIntervalSeconds > input.maxIntervalSeconds) {
     throw new Error("Invalid queue interval range.");
   }
   if (input.strategy === "ROUND_ROBIN" && input.variantIds.length === 0) throw new Error("ROUND_ROBIN requires at least one content variant.");

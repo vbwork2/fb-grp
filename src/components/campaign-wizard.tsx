@@ -36,8 +36,8 @@ export function CampaignWizard({
   const [category, setCategory] = useState("");
   const [groupIds, setGroupIds] = useState<string[]>([]);
   const [scheduledStartAt, setScheduledStartAt] = useState("");
-  const [minIntervalSeconds, setMinIntervalSeconds] = useState(300);
-  const [maxIntervalSeconds, setMaxIntervalSeconds] = useState(600);
+  const [minIntervalSeconds, setMinIntervalSeconds] = useState(2);
+  const [maxIntervalSeconds, setMaxIntervalSeconds] = useState(2);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -66,8 +66,8 @@ export function CampaignWizard({
       setError("Select at least one active group.");
       return;
     }
-    if (step === 3 && (minIntervalSeconds < 60 || maxIntervalSeconds < minIntervalSeconds)) {
-      setError("Use intervals of at least 60 seconds, with maximum at or above minimum.");
+    if (step === 3 && (minIntervalSeconds < 2 || maxIntervalSeconds < minIntervalSeconds)) {
+      setError("Use intervals of at least 2 seconds, with maximum at or above minimum.");
       return;
     }
     setStep((current) => Math.min(4, current + 1));
@@ -342,7 +342,7 @@ export function CampaignWizard({
               <input
                 id="wizardMin"
                 type="number"
-                min={60}
+                min={2}
                 value={minIntervalSeconds}
                 onChange={(event) => setMinIntervalSeconds(Number(event.target.value))}
               />
@@ -354,7 +354,7 @@ export function CampaignWizard({
               <input
                 id="wizardMax"
                 type="number"
-                min={60}
+                min={2}
                 value={maxIntervalSeconds}
                 onChange={(event) => setMaxIntervalSeconds(Number(event.target.value))}
               />

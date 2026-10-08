@@ -70,8 +70,8 @@ export default function CampaignEditor({ campaign, selectedGroupIds, availableGr
       <fieldset disabled={busy} className="form" style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
         <div className="field"><label htmlFor="editCampaignName"><T>{"Campaign name"}</T></label><input id="editCampaignName" name="name" defaultValue={campaign.name} required maxLength={160} /></div>
         <div className="two-col">
-          <div className="field"><label htmlFor="editCampaignMin"><T>{"Minimum interval (seconds)"}</T></label><input id="editCampaignMin" name="minIntervalSeconds" type="number" min={60} max={86400} defaultValue={campaign.minIntervalSeconds} required /></div>
-          <div className="field"><label htmlFor="editCampaignMax"><T>{"Maximum interval (seconds)"}</T></label><input id="editCampaignMax" name="maxIntervalSeconds" type="number" min={60} max={86400} defaultValue={campaign.maxIntervalSeconds} required /></div>
+          <div className="field"><label htmlFor="editCampaignMin"><T>{"Minimum interval (seconds)"}</T></label><input id="editCampaignMin" name="minIntervalSeconds" type="number" min={2} defaultValue={campaign.minIntervalSeconds} required /></div>
+          <div className="field"><label htmlFor="editCampaignMax"><T>{"Maximum interval (seconds)"}</T></label><input id="editCampaignMax" name="maxIntervalSeconds" type="number" min={2} defaultValue={campaign.maxIntervalSeconds} required /></div>
         </div>
         <div className="field"><label htmlFor="editCampaignContent"><T>{"Content"}</T></label><select id="editCampaignContent" value={contentId} onChange={(event) => chooseContent(event.target.value)}><option value=""><T>{"Create new content"}</T></option>{availableContents.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></div>
         <button className="button small" type="button" style={{ justifySelf: "start" }} onClick={() => chooseContent("")}><T>{"Remove selected content"}</T></button>
