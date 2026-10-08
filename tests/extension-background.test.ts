@@ -210,7 +210,7 @@ describe("manual-confirmed automatic campaign (no three-group limit)", () => {
     fetchMock.mockResolvedValue(json({ reset: 2 }));
     const result = await send({ type: "AUTO_RESET_FAILED" });
     expect(result.ok).toBe(true);
-    expect(fetchMock.mock.calls[0][0]).toContain("/api/extension/campaigns/reset");
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/api/extension/campaigns/reset");
     expect(saved.automatic).toMatchObject({ enabled: false, status: "Failed groups reset. Start the campaign to continue." });
   });
   it("keeps uncertain job reserved after restart", async () => {
