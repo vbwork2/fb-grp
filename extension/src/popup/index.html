@@ -1,20 +1,128 @@
 <!doctype html>
-<html lang="en">
+<html lang="vi">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Groupflow</title>
     <style>
-      body{width:340px;margin:0;padding:18px;font:13px Arial,sans-serif;color:#14241f;background:#f7f9f7}h1{font-size:17px;margin:0 0 4px}p{color:#68776f;line-height:1.45}.panel{background:#fff;border:1px solid #e1e9e3;border-radius:9px;padding:14px;margin:12px 0}.field{display:grid;gap:5px;margin:10px 0}.field label{font-size:11px;font-weight:bold}.field input{padding:9px;border:1px solid #dce5df;border-radius:6px}.buttons{display:flex;gap:7px;flex-wrap:wrap}button{background:white;color:#18251f;border:1px solid #dfe8e1;border-radius:6px;padding:9px 11px;font-weight:bold;cursor:pointer}button.primary{background:#176c50;color:white;border-color:#176c50}button:disabled{opacity:.45;cursor:default}.status{min-height:16px;color:#9b3838;font-size:12px}.caption{white-space:pre-wrap;max-height:125px;overflow:auto;background:#f5f8f5;padding:9px;border-radius:6px;line-height:1.4}.hidden{display:none}.job-title{font-weight:bold;margin-bottom:6px}
+      *{box-sizing:border-box}
+      body{width:360px;margin:0;font:13px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#17372e;background:#f4f7f5}
+      header{display:flex;align-items:center;justify-content:space-between;padding:17px 18px 12px}
+      header h1{font-size:19px;line-height:1.2;margin:0;letter-spacing:-.5px}
+      .brand{display:flex;align-items:center;gap:10px}
+      .logo{display:grid;place-items:center;background:#176c50;color:white;border-radius:12px;font-weight:800;font-size:17px;width:37px;height:37px}
+      .subtitle{margin:4px 0 0;color:#657970;font-size:11px}
+      #language{width:auto;padding:6px 8px;font-size:11px}
+      main{padding:0 14px 12px}
+      .panel{background:#fff;border:1px solid #e1e9e4;border-radius:14px;padding:15px;margin-bottom:12px;box-shadow:0 2px 6px #164a3010}
+      .section-title{display:block;font-size:13px;font-weight:750;margin-bottom:9px}
+      .field{display:grid;gap:6px;margin-bottom:12px}
+      label{font-size:12px;font-weight:650}
+      input:not([type="checkbox"]),select{min-width:0;width:100%;padding:10px;border:1px solid #cedbd3;border-radius:9px;color:#17372e;background:white;font:inherit}
+      input:focus-visible,select:focus-visible,button:focus-visible,summary:focus-visible{outline:2px solid #176c50;outline-offset:2px}
+      button{border:1px solid #d4e2d9;background:#fff;color:#17372e;border-radius:9px;padding:9px 11px;font:inherit;font-weight:700;cursor:pointer}
+      button.primary{background:#176c50;border-color:#176c50;color:white}
+      button.primary:hover:not(:disabled){background:#0d563d}
+      button:disabled{opacity:.5;cursor:default}
+      .buttons{display:flex;gap:8px;flex-wrap:wrap}
+      .buttons button{flex:1}
+      .campaign-row{display:flex;align-items:center;gap:7px}
+      .campaign-row select{flex:1}
+      .campaign-row button{flex-shrink:0}
+      .hint{font-size:11px;color:#60746a;line-height:1.5;margin:9px 0 0}
+      .notice{background:#edf6f0;border-radius:10px;padding:10px 11px;color:#326149;font-size:11px;margin-bottom:13px}
+      .state{padding:13px 12px;border-radius:10px;border:1px solid #dfebe4;background:#f8fbf9}
+      .state.error{border-color:#f2d5c9;background:#fff7f2}
+      .state.running{border-color:#b9decb;background:#eff9f1}
+      .state strong{display:block;font-size:14px;margin:3px 0}
+      .eyebrow{font-size:10px;letter-spacing:.09em;font-weight:800;text-transform:uppercase;color:#577163}
+      .state.error .eyebrow{color:#9c4b31}
+      .state p{font-size:12px;color:#52675c;margin:5px 0 0;overflow-wrap:anywhere}
+      .state.error p{color:#8e422b}
+      .steps{display:flex;gap:4px;margin:12px 0}
+      .step{flex:1;font-size:10px;color:#8c9b93;text-align:center;border-top:3px solid #e2eae4;padding-top:7px}
+      .step.done{border-color:#176c50;color:#28694d}
+      .step.active{border-color:#66b28b;color:#176c50;font-weight:800}
+      .action-row{display:flex;gap:8px;margin-top:12px}
+      .action-row .primary{flex:1}
+      .action-row .secondary{flex:0 0 auto}
+      #autoOpen,#autoRetry{margin-top:9px}
+      .hidden{display:none!important}
+      details{margin:0 0 12px}
+      summary{cursor:pointer;font-weight:700;list-style-position:inside;padding:5px 0;color:#4c6859}
+      .manual{margin-top:10px;padding-top:9px;border-top:1px solid #edf0ed}
+      .job-title{font-weight:700;overflow-wrap:anywhere}
+      .caption{white-space:pre-wrap;max-height:110px;overflow:auto;background:#f5f8f5;padding:9px;border-radius:6px;line-height:1.4;font-size:11px;margin:8px 0}
+      .manual .buttons{margin-top:10px}
+      #media button{font-size:11px}
+      .feedback{margin:8px 0 0;color:#8f3d2c;font-size:12px;min-height:0;overflow-wrap:anywhere}
+      footer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:4px 6px 12px;color:#809187}
+      footer button{font-size:11px;font-weight:500;padding:6px 9px}
+      .checkbox-label{display:flex;gap:6px;align-items:center}
     </style>
   </head>
   <body>
-    <div class="field"><label id="languageLabel" for="language">Language</label><select id="language"><option value="en">English</option><option value="vi">Tiếng Việt</option></select></div><h1>Groupflow</h1><p data-i18n="Prepare the caption, click Publish to Facebook, then verify the result.">Prepare the caption, click Publish to Facebook, then verify the result.</p>
-    <section id="setup" class="panel"><div class="field"><label for="apiUrl" data-i18n="Application URL">Application URL</label><input id="apiUrl" type="url" placeholder="https://your-app.netlify.app" /></div><div class="field"><label for="code" data-i18n="One-time pairing code">One-time pairing code</label><input id="code" inputmode="numeric" placeholder="829-421" /></div><button id="pair" class="primary" data-i18n="Connect device">Connect device</button></section>
-    <section id="workflow" class="panel hidden"><div class="field"><label for="autoCampaign" data-i18n="Automatic campaign (up to 3 groups)">Automatic campaign (up to 3 groups)</label><select id="autoCampaign"></select></div><p data-i18n="Keep Chrome open and signed in to Facebook. Images will be attached automatically.">Keep Chrome open and signed in to Facebook. Images will be attached automatically.</p><div class="buttons"><button id="autoStart" class="primary" disabled data-i18n="Start automatic posting">Start automatic posting</button><button id="autoStop" disabled data-i18n="Stop automatic posting">Stop automatic posting</button><button id="autoRefresh" data-i18n="Refresh campaigns">Refresh campaigns</button></div><p id="automaticStatus" role="status"></p><hr /><div class="job-title" id="groupName">No active job</div><div id="groupInfo"></div><div id="caption" class="caption hidden"></div><div id="media" class="buttons"></div><label id="imageConfirmation" class="hidden"><input type="checkbox" id="imagesAttached" /><span data-i18n="Images attached in Facebook">Images attached in Facebook</span></label><div class="buttons" style="margin-top:12px"><button id="next" class="primary" data-i18n="Get next group">Get next group</button><button id="open" class="hidden" data-i18n="Open group">Open group</button><button id="prepare" class="hidden" data-i18n="Prepare caption">Prepare caption</button><button id="copy" class="hidden" data-i18n="Copy caption">Copy caption</button><button id="publish" class="primary hidden" data-i18n="Publish to Facebook">Publish to Facebook</button><button id="posted" class="hidden" data-i18n="I posted it">I posted it</button><button id="skip" class="hidden" data-i18n="Skip group">Skip group</button><button id="failed" class="hidden" data-i18n="Report issue">Report issue</button></div></section>
-    <section class="panel"><div id="status" class="status" role="status"></div><button id="disconnect" data-i18n="Disconnect device">Disconnect device</button></section>
+    <header>
+      <div class="brand"><div class="logo" aria-hidden="true">G</div><div><h1>Groupflow</h1><p class="subtitle" data-i18n="Simple Facebook Group posting">Simple Facebook Group posting</p></div></div>
+      <select id="language" aria-label="Language"><option value="vi">Tiếng Việt</option><option value="en">English</option></select>
+      <span id="languageLabel" class="hidden">Language</span>
+    </header>
+    <main>
+      <section id="setup" class="panel">
+        <strong class="section-title" data-i18n="Connect your browser once">Connect your browser once</strong>
+        <div class="field"><label for="apiUrl" data-i18n="Application URL">Application URL</label><input id="apiUrl" type="url" placeholder="https://your-app.netlify.app" /></div>
+        <div class="field"><label for="code" data-i18n="One-time pairing code">One-time pairing code</label><input id="code" inputmode="numeric" placeholder="829-421" /></div>
+        <button id="pair" class="primary" data-i18n="Connect device">Connect device</button>
+        <p class="hint" data-i18n="Get the one-time code from Settings on your Groupflow website.">Get the one-time code from Settings on your Groupflow website.</p>
+      </section>
+      <section id="workflow" class="hidden">
+        <div class="panel">
+          <div class="notice" data-i18n="Sign in to Facebook in Chrome first. Keep the browser open while posting.">Sign in to Facebook in Chrome first. Keep the browser open while posting.</div>
+          <label class="section-title" for="autoCampaign" data-i18n="1. Choose campaign">1. Choose campaign</label>
+          <div class="campaign-row"><select id="autoCampaign" aria-label="Automatic campaign"></select><button id="autoRefresh" title="Refresh campaigns" data-i18n="Refresh">Refresh</button></div>
+          <p id="campaignHint" class="hint" data-i18n="Each run can post to up to 3 groups.">Each run can post to up to 3 groups.</p>
+          <div style="height:16px"></div>
+          <span class="section-title" data-i18n="2. Start posting">2. Start posting</span>
+          <div class="action-row"><button id="autoStart" class="primary" disabled data-i18n="Start posting">Start posting</button><button id="autoStop" class="secondary" disabled data-i18n="Stop">Stop</button></div>
+          <button id="autoRetry" class="hidden" data-i18n="Try again (no post sent)">Try again (no post sent)</button>
+          <div style="height:18px"></div>
+          <span class="section-title" data-i18n="3. Live progress">3. Live progress</span>
+          <div id="autoState" class="state" role="status" aria-live="polite">
+            <span id="autoStateLabel" class="eyebrow" data-i18n="READY">READY</span>
+            <strong id="autoStatusTitle" data-i18n="Ready to post">Ready to post</strong>
+            <p id="automaticStatus" data-i18n="Choose a campaign and press Start posting.">Choose a campaign and press Start posting.</p>
+          </div>
+          <div class="steps" aria-label="Posting progress">
+            <div id="autoStep1" class="step" data-i18n="Open group">Open group</div><div id="autoStep2" class="step" data-i18n="Prepare post">Prepare post</div><div id="autoStep3" class="step" data-i18n="Verify result">Verify result</div>
+          </div>
+          <button id="autoOpen" class="hidden" data-i18n="Open current Facebook Group">Open current Facebook Group</button>
+          <p id="autoHelp" class="hint" data-i18n="If posting stops, open the group and check the message above before trying again.">If posting stops, open the group and check the message above before trying again.</p>
+        </div>
+        <div class="panel">
+          <details id="manualDetails"><summary data-i18n="Advanced: manual posting and recovery">Advanced: manual posting and recovery</summary>
+            <div class="manual">
+              <div class="job-title" id="groupName">No active job</div><div id="groupInfo" class="hint"></div>
+              <div id="caption" class="caption hidden"></div>
+              <div id="media" class="buttons"></div>
+              <label id="imageConfirmation" class="checkbox-label hidden"><input type="checkbox" id="imagesAttached" /><span data-i18n="Images attached in Facebook">Images attached in Facebook</span></label>
+              <div class="buttons">
+                <button id="next" data-i18n="Get next group">Get next group</button>
+                <button id="open" class="hidden" data-i18n="Open group">Open group</button>
+                <button id="prepare" class="hidden" data-i18n="Prepare caption">Prepare caption</button>
+                <button id="copy" class="hidden" data-i18n="Copy caption">Copy caption</button>
+                <button id="publish" class="primary hidden" data-i18n="Publish to Facebook">Publish to Facebook</button>
+                <button id="posted" class="hidden" data-i18n="I posted it">I posted it</button>
+                <button id="skip" class="hidden" data-i18n="Skip group">Skip group</button>
+                <button id="failed" class="hidden" data-i18n="Report issue">Report issue</button>
+              </div>
+              <p class="hint" data-i18n="Check Facebook before marking a post as sent. Never resend an uncertain submission.">Check Facebook before marking a post as sent. Never resend an uncertain submission.</p>
+            </div>
+          </details>
+        </div>
+      </section>
+      <div id="status" class="feedback" role="status" aria-live="polite"></div>
+      <footer><span data-i18n="Facebook credentials stay in Chrome">Facebook credentials stay in Chrome</span><button id="disconnect" data-i18n="Disconnect device">Disconnect device</button></footer>
+    </main>
     <script type="module" src="main.ts"></script>
   </body>
 </html>
-
-

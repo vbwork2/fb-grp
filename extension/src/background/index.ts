@@ -122,7 +122,7 @@ chrome.runtime.onMessage.addListener((message: { type: string; apiUrl?: string; 
 
 
 
-type AutomaticRun = { runId: string; campaignId: string; enabled: boolean; attempts: number; tabId?: number; status: string; error?: string; phase: "WAITING" | "PREPARING" | "SUBMITTING" | "PAUSED" };
+type AutomaticRun = { runId: string; campaignId: string; enabled: boolean; attempts: number; tabId?: number; status: string; error?: string; phase: "WAITING" | "OPENING" | "PREPARING" | "SUBMITTING" | "PAUSED"; groupName?: string };
 const automaticAlarm = "groupflow-automatic";
 let automaticBusy = false;
 
@@ -132,17 +132,26 @@ async function active(run: AutomaticRun) {
   if (!state?.enabled || state.runId !== run.runId) throw new Error("Automatic posting was stopped.");
   return state;
 }
+async function announceAutomatic(state: AutomaticRun) {
+  if (!state.tabId) return;
+  await chrome.tabs.sendMessage(state.tabId, {
+    type: "AUTO_PROGRESS", phase: state.phase, status: state.status,
+    error: state.error, enabled: state.enabled
+  }).catch(() => undefined);
+}
 async function updateAutomatic(run: AutomaticRun, values: Partial<AutomaticRun>) {
   const state = await active(run);
   const next = { ...state, ...values };
   await chrome.storage.local.set({ automatic: next });
   Object.assign(run, next);
+  await announceAutomatic(next);
 }
 async function stopAutomatic(error = "") {
   const state = await automaticState();
   if (!state) return;
   await chrome.storage.local.set({ automatic: { ...state, enabled: false, phase: "PAUSED", status: "Automatic posting stopped.", error } });
   await chrome.alarms.clear(automaticAlarm);
+  await announceAutomatic({ ...state, enabled: false, phase: "PAUSED", error });
   const job = (await settings()).job;
   if (state.tabId && job) await chrome.tabs.sendMessage(state.tabId, { type: "CANCEL_JOB", jobId: job.id }).catch(() => undefined);
 }
@@ -188,7 +197,7 @@ async function runAutomatic() {
     const job = reply.job;
     if (job.campaignId !== run.campaignId) throw new Error("The selected job changed. Review the current job before publishing.");
     await chrome.storage.local.set({ job });
-    await updateAutomatic(run, { phase: "PREPARING", status: "Opening the next group." });
+    await updateAutomatic(run, { phase: "OPENING", groupName: job.group.name, status: "Opening the next group." });
     let tab: chrome.tabs.Tab | undefined;
     if (run.tabId) {
       tab = await chrome.tabs.update(run.tabId, { url: job.group.url, active: true }).catch(() => chrome.tabs.create({ url: job.group.url, active: true }));
@@ -197,7 +206,19 @@ async function runAutomatic() {
     await updateAutomatic(run, { tabId: tab.id });
     const ready = await loadedTab(tab.id, run);
     if (!sameGroup(ready.url, job.group.url)) throw new Error("Sign in or complete verification directly on Facebook, then resume.");
-    await updateAutomatic(run, { status: "Uploading images and preparing the post." });
+    // Page completion does not guarantee Manifest V3 content-script readiness.
+    // Ask the adapter directly before attempting a compose action.
+    let responsive = false;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await active(run);
+      try {
+        const pong = await chrome.tabs.sendMessage(tab.id, { type: "PING" });
+        if (pong?.ok) { responsive = true; break; }
+      } catch { /* Content script may still be initializing. */ }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    if (!responsive) throw new Error("The Facebook adapter is unavailable. Reload the extension and Facebook tab.");
+    await updateAutomatic(run, { phase: "PREPARING", status: "Uploading images and preparing the post." });
     const attachments: { id: string; filename: string; mimeType: string; dataUrl: string }[] = [];
     for (const file of job.content.media) {
       await active(run);

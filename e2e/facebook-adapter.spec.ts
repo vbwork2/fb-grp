@@ -111,3 +111,23 @@ test("stop cancels verification of an uncertain submission without clicking agai
   expect((await pending).outcome).toBe("unknown");
   expect((await send(page, { type: "PUBLISH_POST", ...job })).ok).toBe(false);
 });
+
+test("localized composer trigger opens a post editor even when a comment textbox exists", async ({ page }) => {
+  await setup(page, '<div role="textbox" contenteditable="true">Comment field</div><button id="compose" aria-label="Bạn viết gì đi, Vinh?">Compose</button>');
+  await page.evaluate(() => {
+    document.getElementById("compose")!.onclick = () => {
+      const dialog = document.createElement("div");
+      dialog.setAttribute("role", "dialog");
+      dialog.innerHTML = '<div role="textbox" contenteditable="true"></div><button class="post">Đăng</button>';
+      document.body.append(dialog);
+    };
+  });
+  expect((await send(page, { type: "PREPARE_CAPTION", ...job })).ok).toBe(true);
+  await expect(page.locator("[role='dialog'] [role='textbox']")).toContainText("Reviewed caption");
+  await expect(page.locator("body > [role='textbox']")).toHaveText("Comment field");
+});
+
+test("ambiguous composer entry points do not trigger accidental clicks", async ({ page }) => {
+  await setup(page, '<button aria-label="Write something...">A</button><button aria-label="Write something...">B</button>');
+  expect((await send(page, { type: "PREPARE_CAPTION", ...job })).reason).toBe("COMPOSER_NOT_FOUND");
+});
