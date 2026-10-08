@@ -8,8 +8,15 @@ async function setup(page: Page, html: string) {
   await page.route("https://www.facebook.com/**", (route) => route.fulfill({ contentType: "text/html; charset=utf-8", body: html }));
   await page.goto(groupUrl);
   await page.evaluate(() => {
-    const runtime = window as unknown as { chrome: unknown; adapterListener?: unknown; finalPostClicks: number };
-    runtime.chrome = { runtime: { onMessage: { addListener: (handler: unknown) => { runtime.adapterListener = handler; } } } };
+    const runtime = window as unknown as { chrome: unknown; adapterListener?: unknown; finalPostClicks: number; automaticEvents: Array<{ type: string; jobId?: string; outcome?: string }> };
+    runtime.automaticEvents = [];
+    runtime.chrome = { runtime: {
+      onMessage: { addListener: (handler: unknown) => { runtime.adapterListener = handler; } },
+      sendMessage: async (message: { type: string; jobId?: string; outcome?: string }) => {
+        runtime.automaticEvents.push(message);
+        return { ok: true };
+      }
+    } };
     runtime.finalPostClicks = 0;
     document.querySelectorAll("button.post").forEach((button) => button.addEventListener("click", () => runtime.finalPostClicks++));
   });
@@ -328,4 +335,42 @@ test("textarea composer retains CRLF and Unicode paragraph separators", async ({
   const result = await send(page, { type: "PREPARE_CAPTION", ...job, caption, linkUrl: null });
   expect(result).toMatchObject({ ok: true, clicked: false });
   await expect(page.locator("textarea")).toHaveValue("Chủ đề 1\nChủ đề 2\n\n📍 Địa điểm");
+});
+
+
+test("human clicks Facebook Post after preparation; extension reports outcome without auto-clicking", async ({ page }) => {
+  await setup(page, '<div role="dialog"><div role="textbox" contenteditable="true"></div><button class="post">Đăng</button></div>');
+  await page.evaluate(() => {
+    document.querySelector<HTMLElement>("button.post")!.onclick = () => {
+      const notice = document.createElement("div");
+      notice.setAttribute("role", "status");
+      notice.textContent = "Your post was published.";
+      document.body.append(notice);
+    };
+  });
+  expect((await send(page, { type: "PREPARE_CAPTION", ...job })).ok).toBe(true);
+  expect((await send(page, { type: "ARM_USER_POST", ...job })).ok).toBe(true);
+  expect(await page.evaluate(() => (window as unknown as { finalPostClicks: number }).finalPostClicks)).toBe(0);
+  await page.getByRole("button", { name: "Đăng" }).click();
+  await expect.poll(() => page.evaluate(() => {
+    const events = (window as unknown as { automaticEvents: Array<{ type: string }> }).automaticEvents;
+    return events.filter((event) => event.type === "USER_POST_RESULT").length;
+  })).toBe(1);
+  const events = await page.evaluate(() =>
+    (window as unknown as { automaticEvents: Array<{ type: string; outcome?: string }> }).automaticEvents
+  );
+  expect(events.find((event) => event.type === "USER_POST_CLICKED")).toBeDefined();
+  expect(events.find((event) => event.type === "USER_POST_RESULT")?.outcome).toBe("published");
+  expect(await page.evaluate(() => (window as unknown as { finalPostClicks: number }).finalPostClicks)).toBe(1);
+});
+
+test("cancelling a prepared watcher prevents later submission callbacks", async ({ page }) => {
+  await setup(page, '<div role="dialog"><div role="textbox" contenteditable="true"></div><button class="post">Post</button></div>');
+  expect((await send(page, { type: "ARM_USER_POST", ...job })).ok).toBe(true);
+  await send(page, { type: "CANCEL_JOB", jobId: job.jobId });
+  await page.getByRole("button", { name: "Post" }).click();
+  const events = await page.evaluate(() =>
+    (window as unknown as { automaticEvents: Array<{ type: string }> }).automaticEvents
+  );
+  expect(events.some((event) => event.type === "USER_POST_CLICKED")).toBe(false);
 });
