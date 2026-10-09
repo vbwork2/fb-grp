@@ -208,7 +208,7 @@ async function refreshCampaigns() {
 void chrome.storage.local.get(["apiUrl", "deviceToken", "job", "locale", "automatic", "autoClickPost"]).then((saved) => {
   autoClickPost = saved.autoClickPost === true;
   locale = saved.locale === "en" ? "en" : "vi";
-  apiUrl.value = String(saved.apiUrl ?? "");
+  apiUrl.value = typeof saved.apiUrl === "string" && saved.apiUrl.trim() ? saved.apiUrl : apiUrl.defaultValue;
   currentAutomatic = saved.automatic as AutomaticRun | undefined;
   showJob(saved.job as Job | undefined, Boolean(saved.deviceToken));
   renderLanguage();
