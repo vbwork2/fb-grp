@@ -1,5 +1,7 @@
 "use client";
 
+import { ActionButton } from "@/components/loading";
+
 import { T, LocalizedInput } from "@/components/language-provider";
 import { useMemo, useState } from "react";
 import { AlertCircleIcon } from "@/components/icons";
@@ -252,7 +254,7 @@ export function CampaignWizard({
 
           <div className="flex items-center justify-between flex-wrap gap-2 pt-2">
             <div className="buttons">
-              <button
+              <ActionButton
                 type="button"
                 className="button small"
                 onClick={() =>
@@ -262,14 +264,14 @@ export function CampaignWizard({
                 }
               >
                 <T>{"Select all shown"}</T>
-              </button>
-              <button
+              </ActionButton>
+              <ActionButton
                 type="button"
                 className="button small"
                 onClick={() => setGroupIds([])}
               >
                 <T>{"Deselect all"}</T>
-              </button>
+              </ActionButton>
             </div>
             <div className="badge blue text-xs font-semibold">
               <span>{groupIds.length}</span>
@@ -458,7 +460,7 @@ export function CampaignWizard({
 
       {/* Stepper Buttons */}
       <div className="flex items-center justify-between pt-4 border-t border-slate-100">
-        <button
+        <ActionButton
           type="button"
           className="button"
           disabled={step === 1 || busy}
@@ -468,21 +470,21 @@ export function CampaignWizard({
           }}
         >
           <T>{"Back"}</T>
-        </button>
+        </ActionButton>
 
         {step < 4 ? (
-          <button type="button" className="button primary" onClick={continueStep}>
+          <ActionButton type="button" className="button primary" onClick={continueStep}>
             <T>{"Continue"}</T>
-          </button>
+          </ActionButton>
         ) : (
-          <button
+          <ActionButton
             type="button"
             className="button primary"
             disabled={busy}
-            onClick={() => void createCampaign()}
+            onClick={() => createCampaign()}
           >
             <T>{busy ? "Creating…" : "Create campaign"}</T>
-          </button>
+          </ActionButton>
         )}
       </div>
     </div>

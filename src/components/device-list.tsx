@@ -1,5 +1,7 @@
 "use client";
 
+import { ActionButton } from "@/components/loading";
+
 import { T } from "@/components/language-provider";
 import { translateDialog } from "@/lib/i18n";
 import { useState } from "react";
@@ -95,15 +97,15 @@ export default function DeviceList({ initialDevices }: { initialDevices: Device[
                 </td>
                 <td>
                   <div className="flex items-center justify-end">
-                    <button
+                    <ActionButton
                       type="button"
                       className="button small danger"
-                      onClick={() => void revoke(device.id)}
+                      onClick={() => revoke(device.id)}
                       title="Revoke device access"
                     >
                       <TrashIcon className="w-3 h-3" />
                       <span><T>{"Revoke"}</T></span>
-                    </button>
+                    </ActionButton>
                   </div>
                 </td>
               </tr>

@@ -1,5 +1,7 @@
 "use client";
 
+import { ActionButton } from "@/components/loading";
+
 import { T } from "@/components/language-provider";
 import { useRouter } from "next/navigation";
 import { SignOutIcon } from "@/components/icons";
@@ -14,9 +16,9 @@ export default function SignOutButton() {
   }
 
   return (
-    <button type="button" className="button small" onClick={signOut} title="Sign out of workspace">
+    <ActionButton type="button" className="button small" onClick={signOut} title="Sign out of workspace">
       <SignOutIcon className="w-3.5 h-3.5 text-slate-400" />
       <span><T>{"Sign out"}</T></span>
-    </button>
+    </ActionButton>
   );
 }

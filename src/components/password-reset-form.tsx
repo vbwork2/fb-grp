@@ -1,5 +1,7 @@
 "use client";
 
+import { ActionButton, ActionForm } from "@/components/loading";
+
 import { T } from "@/components/language-provider";
 import { useState } from "react";
 import { AlertCircleIcon, CheckIcon } from "@/components/icons";
@@ -32,7 +34,7 @@ export default function PasswordResetRequestForm() {
   }
 
   return (
-    <form className="form space-y-4" onSubmit={submit}>
+    <ActionForm className="form space-y-4" onSubmit={submit}>
       <div className="field">
         <label htmlFor="resetEmail">
           <T>{"Email"}</T>
@@ -61,9 +63,9 @@ export default function PasswordResetRequestForm() {
         </div>
       )}
 
-      <button className="button primary w-full" disabled={busy} style={{ width: "100%" }}>
+      <ActionButton className="button primary w-full" disabled={busy} style={{ width: "100%" }}>
         <T>{busy ? "Sending…" : "Send reset link"}</T>
-      </button>
-    </form>
+      </ActionButton>
+    </ActionForm>
   );
 }

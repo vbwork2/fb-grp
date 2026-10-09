@@ -1,5 +1,7 @@
 "use client";
 
+import { ActionButton, ActionForm, LoadingDots, LoadingStatus } from "@/components/loading";
+
 import { T, LocalizedInput, LocalizedTextarea } from "@/components/language-provider";
 import { translateDialog } from "@/lib/i18n";
 import { Fragment, useEffect, useState } from "react";
@@ -90,6 +92,7 @@ export function GroupsPanel({ initialGroups }: { initialGroups: Group[] }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [editingGroup, setEditingGroup] = useState<Group | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   async function add(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -132,7 +135,8 @@ export function GroupsPanel({ initialGroups }: { initialGroups: Group[] }) {
   async function importCsv(event: React.ChangeEvent<HTMLInputElement>) {
     const inputElement = event.currentTarget;
     const file = inputElement.files?.[0];
-    if (!file) return;
+    if (!file || importing) return;
+    setImporting(true);
     setError("");
     setSuccess("");
     const form = new FormData();
@@ -155,6 +159,7 @@ export function GroupsPanel({ initialGroups }: { initialGroups: Group[] }) {
       setError(cause instanceof Error ? cause.message : "Unable to import CSV.");
     } finally {
       inputElement.value = "";
+      setImporting(false);
     }
   }
 
@@ -193,7 +198,7 @@ export function GroupsPanel({ initialGroups }: { initialGroups: Group[] }) {
           </span>
         </div>
 
-        <form className="form p-5" onSubmit={add}>
+        <ActionForm className="form p-5" onSubmit={add}>
           <div className="two-col">
             <div className="field">
               <label htmlFor="groupName">
@@ -235,25 +240,26 @@ export function GroupsPanel({ initialGroups }: { initialGroups: Group[] }) {
           <Feedback error={error} success={success} />
 
           <div className="flex items-center gap-3 pt-2">
-            <button
+            <ActionButton
               className="button primary"
               disabled={isSubmitting}
               style={{ justifySelf: "start" }}
             >
               <PlusIcon className="w-4 h-4" />
               <span><T>{isSubmitting ? "Adding…" : "Add group"}</T></span>
-            </button>
+            </ActionButton>
           </div>
-        </form>
+        </ActionForm>
 
         <div className="p-5 pt-0 border-t border-slate-100 flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-2">
-            <label className="button small" htmlFor="groupCsv" title="Import Facebook Groups from CSV">
+            <label className="button small" aria-busy={importing} htmlFor="groupCsv" title="Import Facebook Groups from CSV">
               <UploadIcon className="w-3.5 h-3.5 text-slate-500" />
-              <span><T>{"Import CSV"}</T></span>
+              {importing && <LoadingDots />}<span><T>{importing ? "Please wait…" : "Import CSV"}</T></span>
             </label>
             <input
               id="groupCsv"
+              disabled={importing}
               type="file"
               accept=".csv,text/csv"
               onChange={(event) => void importCsv(event)}
@@ -286,14 +292,14 @@ export function GroupsPanel({ initialGroups }: { initialGroups: Group[] }) {
               />
             </div>
             {selected.length > 0 && (
-              <button
+              <ActionButton
                 type="button"
                 className="button small danger"
-                onClick={() => void disableSelected()}
+                onClick={() => disableSelected()}
               >
                 <T>{"Disable "}</T>
                 {selected.length}
-              </button>
+              </ActionButton>
             )}
           </div>
         </div>
@@ -410,7 +416,7 @@ export function GroupsPanel({ initialGroups }: { initialGroups: Group[] }) {
                     </td>
                     <td>
                       <div className="flex items-center justify-end gap-1.5">
-                        <button
+                        <ActionButton
                           type="button"
                           className="button small"
                           aria-expanded={editingGroup?.id === group.id}
@@ -420,25 +426,24 @@ export function GroupsPanel({ initialGroups }: { initialGroups: Group[] }) {
                         >
                           <EditIcon className="w-3 h-3 text-slate-500" />
                           <span><T>{"Edit"}</T></span>
-                        </button>
-                        <button
+                        </ActionButton>
+                        <ActionButton
                           type="button"
                           className="button small"
-                          onClick={() =>
-                            void setStatus(group, group.status === "PAUSED" ? "ACTIVE" : "PAUSED")
+                          onClick={() => setStatus(group, group.status === "PAUSED" ? "ACTIVE" : "PAUSED")
                           }
                         >
                           <T>{group.status === "PAUSED" ? "Resume" : "Pause"}</T>
-                        </button>
-                        <button
+                        </ActionButton>
+                        <ActionButton
                           type="button"
                           className="button small danger"
-                          onClick={() => void remove(group)}
+                          onClick={() => remove(group)}
                           title="Delete group"
                         >
                           <TrashIcon className="w-3 h-3" />
                           <span><T>{"Delete"}</T></span>
-                        </button>
+                        </ActionButton>
                       </div>
                     </td>
                   </tr>
@@ -501,12 +506,12 @@ function GroupEditor({
             <T>{"Edit group"}</T>
           </h2>
         </div>
-        <button type="button" className="button small" onClick={onClose}>
+        <ActionButton type="button" className="button small" onClick={onClose}>
           <CloseIcon className="w-3.5 h-3.5" />
           <span><T>{"Close"}</T></span>
-        </button>
+        </ActionButton>
       </div>
-      <form className="form p-5" onSubmit={submit}>
+      <ActionForm className="form p-5" onSubmit={submit}>
         <div className="field">
           <label htmlFor="editGroupName">
             <T>{"Name"}</T>
@@ -544,14 +549,14 @@ function GroupEditor({
           </p>
         )}
 
-        <button
+        <ActionButton
           className="button primary"
           disabled={busy}
           style={{ justifySelf: "start" }}
         >
           <T>{busy ? "Saving…" : "Save changes"}</T>
-        </button>
-      </form>
+        </ActionButton>
+      </ActionForm>
     </div>
   );
 }
@@ -714,7 +719,7 @@ export function ContentPanel({ initialContents, initialMedia = {} }: { initialCo
             </h2>
           </div>
         </div>
-        <form className="form p-5" onSubmit={add}>
+        <ActionForm className="form p-5" onSubmit={add}>
           <fieldset
             disabled={busy || contentSaving || deletingImageId !== null || uploadingId !== null}
             className="form"
@@ -803,17 +808,17 @@ export function ContentPanel({ initialContents, initialMedia = {} }: { initialCo
             </div>
 
             <div className="pt-2">
-              <button
+              <ActionButton
                 className="button primary"
                 disabled={busy}
                 style={{ justifySelf: "start" }}
               >
                 <T>{busy ? "Saving…" : "Save content"}</T>
-              </button>
+              </ActionButton>
             </div>
           </fieldset>
           <Feedback error={uploadFeedbackId !== null && detailId === uploadFeedbackId ? "" : error} success={uploadFeedbackId !== null && detailId === uploadFeedbackId ? "" : success} />
-        </form>
+        </ActionForm>
       </div>
 
       {/* Saved Content Library */}
@@ -857,15 +862,15 @@ export function ContentPanel({ initialContents, initialMedia = {} }: { initialCo
                       <strong className="text-base font-semibold text-slate-900">{item.name}</strong>
                       <p className="muted text-sm mt-1 mb-0" aria-live="polite">{mediaForContent.length}<T>{" images uploaded"}</T></p>
                     </div>
-                    <button type="button" className="button small" disabled={contentSaving} aria-expanded={detailsOpen}
+                    <ActionButton type="button" className="button small" disabled={contentSaving} aria-expanded={detailsOpen}
                       aria-controls={`content-details-${item.id}`}
                       onClick={() => setDetailId(detailsOpen ? null : item.id)}>
                       <T>{detailsOpen ? "Hide details" : "Details"}</T>
-                    </button>
+                    </ActionButton>
                   </div>
                   <div id={`content-details-${item.id}`} hidden={!detailsOpen}>
                     <div className="buttons" style={{ flexWrap: "wrap" }}>
-                      <button
+                      <ActionButton
                         type="button"
                         className="button small"
                         disabled={busy || contentSaving || deletingImageId !== null || uploadingId !== null || pendingContentId === item.id || editingContent?.id === item.id}
@@ -874,27 +879,27 @@ export function ContentPanel({ initialContents, initialMedia = {} }: { initialCo
                       >
                         <EditIcon className="w-3 h-3 text-slate-500" />
                         <span><T>{"Edit"}</T></span>
-                      </button>
-                      <button
+                      </ActionButton>
+                      <ActionButton
                         type="button"
                         className="button small"
                         disabled={busy || contentSaving || deletingImageId !== null || uploadingId !== null || pendingContentId === item.id}
-                        onClick={() => void duplicate(item)}
+                        onClick={() => duplicate(item)}
                         title="Duplicate content"
                       >
                         <CopyIcon className="w-3 h-3 text-slate-500" />
                         <span><T>{"Duplicate"}</T></span>
-                      </button>
-                      <button
+                      </ActionButton>
+                      <ActionButton
                         type="button"
                         className="button small danger"
                         disabled={busy || contentSaving || deletingImageId !== null || uploadingId !== null || pendingContentId === item.id}
-                        onClick={() => void remove(item.id)}
+                        onClick={() => remove(item.id)}
                         title="Delete content"
                       >
                         <TrashIcon className="w-3 h-3" />
                         <span><T>{"Delete"}</T></span>
-                      </button>
+                      </ActionButton>
                     </div>
 
 
@@ -934,12 +939,12 @@ export function ContentPanel({ initialContents, initialMedia = {} }: { initialCo
                       disabled={busy || contentSaving || deletingImageId !== null || uploadingId !== null || remainingImages.length > 0 || pendingContentId === item.id}
                       onChange={(event) => { const selected = [...(event.currentTarget.files ?? [])]; event.currentTarget.value = ""; void uploadImages(item.id, selected); }} />
                     <p className="muted text-xs"><T>{"Choose JPG, PNG, or WebP images."}</T></p>
-                    {uploadingId === item.id && <p role="status"><T>{"Uploading images…"}</T> {remainingImages.length}<T>{" remaining"}</T></p>}
+                    {uploadingId === item.id && <p role="status"><LoadingDots /><T>{"Uploading images…"}</T> {remainingImages.length}<T>{" remaining"}</T></p>}
                     {remainingImages.length > 0 && uploadingId !== item.id && <div className="notice">
                       <p>{remainingImages.length}<T>{" images waiting to upload"}</T></p>
                       <p className="text-sm" style={{ overflowWrap: "anywhere" }}>{remainingImages.map((file) => file.name).join(", ")}</p>
-                      <button type="button" className="button small" disabled={busy || contentSaving || deletingImageId !== null || uploadingId !== null} onClick={() => void uploadImages(item.id, remainingImages)}><T>{"Retry remaining images"}</T></button>
-                      <button type="button" className="button small" disabled={busy || contentSaving || deletingImageId !== null || uploadingId !== null} onClick={() => setPendingImages((current) => ({ ...current, [item.id]: [] }))}><T>{"Clear selection"}</T></button>
+                      <ActionButton type="button" className="button small" disabled={busy || contentSaving || deletingImageId !== null || uploadingId !== null} onClick={() => uploadImages(item.id, remainingImages)}><T>{"Retry remaining images"}</T></ActionButton>
+                      <ActionButton type="button" className="button small" disabled={busy || contentSaving || deletingImageId !== null || uploadingId !== null} onClick={() => setPendingImages((current) => ({ ...current, [item.id]: [] }))}><T>{"Clear selection"}</T></ActionButton>
                     </div>}
                   </div>
                   <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 160px), 1fr))" }}>
@@ -951,18 +956,18 @@ export function ContentPanel({ initialContents, initialMedia = {} }: { initialCo
                         <div className="p-2 text-xs" style={{ overflowWrap: "anywhere" }}>{image.originalFilename}<p className="muted m-0">{Math.ceil(image.sizeBytes / 1024)} KB</p></div>
                         </a>
                         <div className="p-2 pt-0">
-                          <button type="button" className="button small danger"
+                          <ActionButton type="button" className="button small danger"
                             disabled={busy || contentSaving || uploadingId !== null || deletingImageId !== null || pendingContentId === item.id}
-                            onClick={() => void removeImage(item.id, image)}>
+                            onClick={() => removeImage(item.id, image)}>
                             <T>{deletingImageId === image.id ? "Deleting image…" : "Delete image"}</T>
-                          </button>
+                          </ActionButton>
                         </div>
                       </div>
                     ))}
                   </div>
 
                   <div className="mt-4 pt-3 border-t border-slate-100">
-                    <button
+                    <ActionButton
                       type="button"
                       className="button small"
                       aria-expanded={expanded}
@@ -974,7 +979,7 @@ export function ContentPanel({ initialContents, initialMedia = {} }: { initialCo
                       }
                     >
                       <T>{expanded ? "Hide content variants" : "Show content variants"}</T>
-                    </button>
+                    </ActionButton>
                     {expanded && (
                       <div id={`variants-${item.id}`} className="mt-3">
                         <VariantEditor contentId={item.id} />
@@ -1032,12 +1037,12 @@ function ContentEditor({
             <T>{"Edit content"}</T>
           </h2>
         </div>
-        <button type="button" className="button small" disabled={busy} onClick={onClose}>
+        <ActionButton type="button" className="button small" disabled={busy} onClick={onClose}>
           <CloseIcon className="w-3.5 h-3.5" />
           <span><T>{"Close"}</T></span>
-        </button>
+        </ActionButton>
       </div>
-      <form className="form p-5" onSubmit={submit}>
+      <ActionForm className="form p-5" onSubmit={submit}>
         <fieldset disabled={busy} className="form" style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
         <div className="field">
           <label htmlFor="editContentName">
@@ -1082,32 +1087,35 @@ function ContentEditor({
           </p>
         )}
 
-        <button
+        <ActionButton
           className="button primary"
           disabled={busy}
           style={{ justifySelf: "start" }}
         >
           <T>{busy ? "Saving…" : "Save changes"}</T>
-        </button>
+        </ActionButton>
         </fieldset>
-      </form>
+      </ActionForm>
     </div>
   );
 }
 
 function VariantEditor({ contentId }: { contentId: string }) {
   const [variants, setVariants] = useState<Variant[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editBody, setEditBody] = useState("");
 
   useEffect(() => {
+    let active = true;
     void request<Variant[]>(`/api/content/${contentId}/variants`)
-      .then(setVariants)
-      .catch((cause: unknown) =>
-        setError(cause instanceof Error ? cause.message : "Unable to load variants.")
-      );
+      .then((items) => { if (active) setVariants(items); })
+      .catch((cause: unknown) => {
+        if (active) setError(cause instanceof Error ? cause.message : "Unable to load variants.");
+      }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
   }, [contentId]);
 
   async function add(event: React.FormEvent<HTMLFormElement>) {
@@ -1155,6 +1163,7 @@ function VariantEditor({ contentId }: { contentId: string }) {
         <T>{"Content variants"}</T>
       </div>
 
+      {loading && <LoadingStatus />}
       {variants.map((variant) => (
         <div key={variant.id} className="p-3 bg-white border border-slate-200 rounded-lg">
           {editing === variant.id ? (
@@ -1170,20 +1179,20 @@ function VariantEditor({ contentId }: { contentId: string }) {
                 onChange={(event) => setEditBody(event.target.value)}
               />
               <div className="buttons">
-                <button
+                <ActionButton
                   type="button"
                   className="button small primary"
-                  onClick={() => void save(variant.id)}
+                  onClick={() => save(variant.id)}
                 >
                   <T>{"Save variant"}</T>
-                </button>
-                <button
+                </ActionButton>
+                <ActionButton
                   type="button"
                   className="button small"
                   onClick={() => setEditing(null)}
                 >
                   <T>{"Cancel"}</T>
-                </button>
+                </ActionButton>
               </div>
             </div>
           ) : (
@@ -1191,7 +1200,7 @@ function VariantEditor({ contentId }: { contentId: string }) {
               <div className="row mb-2">
                 <strong className="text-sm font-semibold text-slate-900">{variant.name}</strong>
                 <div className="buttons">
-                  <button
+                  <ActionButton
                     type="button"
                     className="button small"
                     onClick={() => {
@@ -1201,14 +1210,14 @@ function VariantEditor({ contentId }: { contentId: string }) {
                     }}
                   >
                     <T>{"Edit"}</T>
-                  </button>
-                  <button
+                  </ActionButton>
+                  <ActionButton
                     type="button"
                     className="button small danger"
-                    onClick={() => void remove(variant.id)}
+                    onClick={() => remove(variant.id)}
                   >
                     <T>{"Delete"}</T>
-                  </button>
+                  </ActionButton>
                 </div>
               </div>
               <p className="text-slate-700 text-xs m-0 leading-relaxed" style={{ whiteSpace: "pre-wrap" }}>
@@ -1219,7 +1228,7 @@ function VariantEditor({ contentId }: { contentId: string }) {
         </div>
       ))}
 
-      <form className="form pt-2" onSubmit={add}>
+      <ActionForm className="form pt-2" onSubmit={add}>
         <div className="two-col">
           <div className="field">
             <label htmlFor={`variantName-${contentId}`}>
@@ -1246,14 +1255,14 @@ function VariantEditor({ contentId }: { contentId: string }) {
             />
           </div>
         </div>
-        <button
+        <ActionButton
           className="button small primary"
           style={{ justifySelf: "start" }}
         >
           <PlusIcon className="w-3.5 h-3.5" />
           <span><T>{"Add variant"}</T></span>
-        </button>
-      </form>
+        </ActionButton>
+      </ActionForm>
       {error && (
         <p className="error" role="alert">
           <AlertCircleIcon className="w-4 h-4 flex-shrink-0" />
@@ -1427,14 +1436,14 @@ export function CampaignsPanel({
                       <div className="flex items-center justify-end gap-2">
                         <DeleteCampaignButton id={campaign.id} name={campaign.name} disabled={campaign.status === "RUNNING"} onDeleted={() => { setItems((current) => current.filter((entry) => entry.campaign.id !== campaign.id)); setSuccess("Campaign deleted."); }} />
                         {campaign.status === "READY" ? (
-                          <button
+                          <ActionButton
                             type="button"
                             className="button small primary"
-                            onClick={() => void start(campaign.id)}
+                            onClick={() => start(campaign.id)}
                           >
                             <PlayIcon className="w-3 h-3" />
                             <span><T>{"Start"}</T></span>
-                          </button>
+                          </ActionButton>
                         ) : (
                           <a href={`/campaigns/${campaign.id}`} className="button small">
                             <T>{"Details"}</T>
@@ -1491,15 +1500,15 @@ export function PairingPanel() {
           </T>
         </p>
 
-        <button
+        <ActionButton
           className="button primary"
           style={{ justifySelf: "start" }}
           disabled={busy}
-          onClick={() => void generate()}
+          onClick={() => generate()}
         >
           <DeviceIcon className="w-4 h-4" />
           <span><T>{busy ? "Generating…" : "Generate pairing code"}</T></span>
-        </button>
+        </ActionButton>
 
         {code && (
           <div className="p-5 bg-blue-50/60 border border-blue-200 rounded-xl space-y-1 inline-block">

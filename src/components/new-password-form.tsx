@@ -1,5 +1,7 @@
 "use client";
 
+import { ActionButton, ActionForm } from "@/components/loading";
+
 import { T } from "@/components/language-provider";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -35,7 +37,7 @@ export default function NewPasswordForm({ token }: { token: string }) {
   }
 
   return (
-    <form className="form space-y-4" onSubmit={submit}>
+    <ActionForm className="form space-y-4" onSubmit={submit}>
       <div className="field">
         <label htmlFor="newPassword">
           <T>{"New password"}</T>
@@ -62,13 +64,13 @@ export default function NewPasswordForm({ token }: { token: string }) {
         </div>
       )}
 
-      <button
+      <ActionButton
         className="button primary w-full"
         disabled={token.length < 32 || busy}
         style={{ width: "100%" }}
       >
         <T>{busy ? "Updating…" : "Update password"}</T>
-      </button>
-    </form>
+      </ActionButton>
+    </ActionForm>
   );
 }

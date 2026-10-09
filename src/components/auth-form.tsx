@@ -1,5 +1,7 @@
 "use client";
 
+import { ActionButton, ActionForm } from "@/components/loading";
+
 import { T } from "@/components/language-provider";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -42,7 +44,7 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
   }
 
   return (
-    <form className="form space-y-4" onSubmit={submit}>
+    <ActionForm className="form space-y-4" onSubmit={submit}>
       {mode === "register" && (
         <div className="field">
           <label htmlFor="displayName">
@@ -100,9 +102,9 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
         </div>
       )}
 
-      <button className="button primary w-full" disabled={busy} style={{ width: "100%" }}>
+      <ActionButton className="button primary w-full" disabled={busy} style={{ width: "100%" }}>
         <T>{busy ? "Please wait…" : mode === "login" ? "Sign in" : "Create account"}</T>
-      </button>
-    </form>
+      </ActionButton>
+    </ActionForm>
   );
 }

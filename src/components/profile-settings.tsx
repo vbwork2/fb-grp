@@ -1,5 +1,7 @@
 "use client";
 
+import { ActionButton, ActionForm } from "@/components/loading";
+
 import { T } from "@/components/language-provider";
 import { useState } from "react";
 import { AlertCircleIcon, CheckIcon } from "@/components/icons";
@@ -33,7 +35,7 @@ export default function ProfileSettings({ displayName }: { displayName: string }
   }
 
   return (
-    <form className="form p-6" onSubmit={submit}>
+    <ActionForm className="form p-6" onSubmit={submit}>
       <div className="field">
         <label htmlFor="displayName">
           <T>{"Display name"}</T>
@@ -94,14 +96,14 @@ export default function ProfileSettings({ displayName }: { displayName: string }
       )}
 
       <div className="pt-2">
-        <button
+        <ActionButton
           className="button primary"
           disabled={busy}
           style={{ justifySelf: "start" }}
         >
           <T>{busy ? "Saving…" : "Save profile"}</T>
-        </button>
+        </ActionButton>
       </div>
-    </form>
+    </ActionForm>
   );
 }

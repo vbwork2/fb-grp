@@ -1,5 +1,7 @@
 "use client";
 
+import { ActionButton } from "@/components/loading";
+
 import { T } from "@/components/language-provider";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -107,7 +109,7 @@ export default function CampaignDetail({
   return (
     <>
       <div className="panel">
-        <div className="panel-head"><h2><T>{"Campaign settings"}</T></h2><button type="button" className="button" disabled={busy || !["READY", "PAUSED"].includes(status)} onClick={() => setEditing((current) => !current)} aria-expanded={editing}><T>{"Edit campaign"}</T></button></div>
+        <div className="panel-head"><h2><T>{"Campaign settings"}</T></h2><ActionButton type="button" className="button" disabled={busy || !["READY", "PAUSED"].includes(status)} onClick={() => setEditing((current) => !current)} aria-expanded={editing}><T>{"Edit campaign"}</T></ActionButton></div>
         {!["READY", "PAUSED"].includes(status) && <p className="muted" style={{ padding: "0 20px 20px" }}><T>{"Pause the campaign before editing. Completed or cancelled campaigns cannot be edited."}</T></p>}
       </div>
       {editing && ["READY", "PAUSED"].includes(status) && <CampaignEditor campaign={campaign} selectedGroupIds={groups.map((group) => group.id)} availableGroups={availableGroups} availableContents={availableContents} onClose={() => setEditing(false)} />}
@@ -184,58 +186,58 @@ export default function CampaignDetail({
           <div className="flex items-center gap-2 flex-wrap">
             <DeleteCampaignButton id={campaign.id} name={campaign.name} disabled={busy || status === "RUNNING" || queue.some((item) => ["OPENED", "AWAITING_CONFIRMATION"].includes(item.status))} />
             {status === "READY" && (
-              <button
+              <ActionButton
                 type="button"
                 className="button primary"
                 disabled={busy}
-                onClick={() => void action("start")}
+                onClick={() => action("start")}
               >
                 <PlayIcon className="w-3.5 h-3.5" />
                 <span><T>{"Start"}</T></span>
-              </button>
+              </ActionButton>
             )}
             {status === "RUNNING" && (
-              <button
+              <ActionButton
                 type="button"
                 className="button"
                 disabled={busy}
-                onClick={() => void action("pause")}
+                onClick={() => action("pause")}
               >
                 <PauseIcon className="w-3.5 h-3.5" />
                 <span><T>{"Pause"}</T></span>
-              </button>
+              </ActionButton>
             )}
             {status === "PAUSED" && (
-              <button
+              <ActionButton
                 type="button"
                 className="button primary"
                 disabled={busy}
-                onClick={() => void action("resume")}
+                onClick={() => action("resume")}
               >
                 <PlayIcon className="w-3.5 h-3.5" />
                 <span><T>{"Resume"}</T></span>
-              </button>
+              </ActionButton>
             )}
             {failed > 0 && (
-              <button
+              <ActionButton
                 type="button"
                 className="button"
                 disabled={busy}
-                onClick={() => void action("retry")}
+                onClick={() => action("retry")}
               >
                 <RefreshIcon className="w-3.5 h-3.5" />
                 <span><T>{"Retry failed"}</T></span>
-              </button>
+              </ActionButton>
             )}
             {["READY", "RUNNING", "PAUSED"].includes(status) && (
-              <button
+              <ActionButton
                 type="button"
                 className="button danger"
                 disabled={busy}
-                onClick={() => void action("cancel")}
+                onClick={() => action("cancel")}
               >
                 <T>{"Cancel"}</T>
-              </button>
+              </ActionButton>
             )}
           </div>
         </div>

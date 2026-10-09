@@ -1,5 +1,7 @@
 "use client";
 
+import { ActionButton } from "@/components/loading";
+
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { T } from "@/components/language-provider";
@@ -27,7 +29,7 @@ export default function DeleteCampaignButton({ id, name, disabled = false, onDel
     } finally { setBusy(false); }
   }
   return <div>
-    <button type="button" className="button small danger" disabled={disabled || busy} title={disabled ? translateDialog("Pause the campaign before deleting it.") : undefined} onClick={() => void remove()}><T>{busy ? "Deleting campaign…" : "Delete campaign"}</T></button>
+    <ActionButton type="button" className="button small danger" disabled={disabled || busy} title={disabled ? translateDialog("Pause the campaign before deleting it.") : undefined} onClick={() => remove()}><T>{busy ? "Deleting campaign…" : "Delete campaign"}</T></ActionButton>
     {error && <p className="error" role="alert"><T>{error}</T></p>}
   </div>;
 }

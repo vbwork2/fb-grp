@@ -26,6 +26,7 @@ async function mount(page: Page, campaign = false) {
   await page.route("http://fixture.test/", (route) => route.fulfill({ contentType: "text/html", body: '<div id="root"></div>' }));
   await page.goto("http://fixture.test/");
   await page.evaluate((value) => { (window as unknown as { fixtureCampaign: boolean }).fixtureCampaign = value; }, campaign);
+  await page.addStyleTag({ content: (await readFile("src/app/globals.css", "utf8")).replace(/^@import.*$/m, "") });
   await page.addScriptTag({ content: bundle });
 }
 const row = (page: Page, name: string) => page.getByRole("row").filter({ has: page.getByText(name, { exact: true }) });
@@ -86,4 +87,54 @@ test("campaign group editor stays inside the selected group and new group form s
   await expect(page.getByLabel("Group name", { exact: true })).toHaveValue("");
   const groupForm = page.locator(".form").filter({ has: page.locator("#campaignGroupName") }).last();
   expect(await groupForm.evaluate((element) => element.previousElementSibling?.textContent)).toContain("Selected groups");
+});
+
+
+test("loading keeps an async row action locked until the response and recovers after failure", async ({ page }) => {
+  await mount(page);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let requests = 0;
+  await page.route("**/api/groups/group-0", async (route) => {
+    requests++;
+    await gate;
+    await route.fulfill({ status: 500, json: { data: null, error: { message: "Unable to update group." } } });
+  });
+  const button = row(page, "Alpha").getByRole("button", { name: "Pause", exact: true });
+  await button.click();
+  await expect(button).toHaveAttribute("aria-busy", "true");
+  await expect(button).toBeDisabled();
+  await expect(button.locator(".loading-dots")).toBeVisible();
+  await button.evaluate((element) => element.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+  expect(requests).toBe(1);
+  release();
+  await expect(button).toBeEnabled();
+  await expect(button).toHaveAttribute("aria-busy", "false");
+  await expect(button.locator(".loading-dots")).toHaveCount(0);
+  await expect(page.getByRole("alert")).toContainText("Unable to update group.");
+});
+
+test("form loading blocks a second submit and retains input after a failed save", async ({ page }) => {
+  await mount(page);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let requests = 0;
+  await page.route("**/api/groups", async (route) => {
+    requests++;
+    await gate;
+    await route.fulfill({ status: 500, json: { data: null, error: { message: "Unable to add the group." } } });
+  });
+  const form = page.locator("form").first();
+  await form.locator('[name="name"]').fill("New group");
+  await form.locator('[name="facebookUrl"]').fill("https://www.facebook.com/groups/new-group/");
+  await form.getByRole("button", { name: "Add group", exact: true }).click();
+  await expect(form).toHaveAttribute("aria-busy", "true");
+  await expect(form.locator("button .loading-dots")).toBeVisible();
+  await form.evaluate((element) => element.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  expect(requests).toBe(1);
+  release();
+  await expect(form).toHaveAttribute("aria-busy", "false");
+  await expect(form.getByRole("button", { name: "Add group", exact: true })).toBeEnabled();
+  await expect(form.locator('[name="name"]')).toHaveValue("New group");
+  await expect(form.getByRole("alert")).toContainText("Unable to add the group.");
 });

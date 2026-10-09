@@ -62,7 +62,7 @@ function showJob(job?: Job, connected = Boolean(job)) {
     mediaPanel.replaceChildren(...job.content.media.map((file) => {
       const button = document.createElement("button");
       button.textContent = t(`View ${file.filename}`);
-      button.onclick = () => void chrome.runtime.sendMessage({ type: "MEDIA", mediaId: file.id })
+      button.onclick = () => chrome.runtime.sendMessage({ type: "MEDIA", mediaId: file.id })
         .then((result: { ok: boolean; dataUrl?: string; error?: string }) => {
           if (!result.ok || !result.dataUrl) { setStatus(result.error ?? "Unable to load image."); return; }
           const preview = document.createElement("img");
@@ -73,17 +73,18 @@ function showJob(job?: Job, connected = Boolean(job)) {
         }).catch(() => setStatus("Unable to load image."));
       return button;
     }));
-    byId<HTMLButtonElement>("open").onclick = () => { void chrome.tabs.create({ url: job.group.url }); };
+    byId<HTMLButtonElement>("open").onclick = () => chrome.tabs.create({ url: job.group.url });
     byId<HTMLButtonElement>("copy").onclick = async () => { await navigator.clipboard.writeText(caption.textContent ?? ""); setStatus("Caption copied."); };
-    byId<HTMLButtonElement>("prepare").onclick = () => void send({ type: "PREPARE" });
-    byId<HTMLButtonElement>("publish").onclick = () => void send({ type: "PUBLISH", jobId: job.id, mediaConfirmed: byId<HTMLInputElement>("imagesAttached").checked });
+    byId<HTMLButtonElement>("prepare").onclick = () => send({ type: "PREPARE" });
+    byId<HTMLButtonElement>("publish").onclick = () => send({ type: "PUBLISH", jobId: job.id, mediaConfirmed: byId<HTMLInputElement>("imagesAttached").checked });
     byId<HTMLButtonElement>("posted").onclick = () => {
-      if (window.confirm(t("Have you checked Facebook and verified that this post is published?"))) void send({ type: "POSTED" }, true);
+      if (window.confirm(t("Have you checked Facebook and verified that this post is published?"))) return send({ type: "POSTED" }, true);
     };
-    byId<HTMLButtonElement>("skip").onclick = () => void send({ type: "SKIP" }, true);
-    byId<HTMLButtonElement>("failed").onclick = () => void send({ type: "FAILED" }, true);
+    byId<HTMLButtonElement>("skip").onclick = () => send({ type: "SKIP" }, true);
+    byId<HTMLButtonElement>("failed").onclick = () => send({ type: "FAILED" }, true);
   }
   renderAutomatic();
+  bindLoadingButtons();
 }
 
 function renderAutomatic() {
@@ -142,12 +143,42 @@ function renderAutomatic() {
   for (const id of ["next", "prepare", "publish", "posted", "skip", "failed", "disconnect"]) {
     byId<HTMLButtonElement>(id).disabled = running || sending || (["next", "publish", "skip", "failed"].includes(id) && Boolean(currentJob?.publishAttempted));
   }
+  for (const button of document.querySelectorAll<HTMLButtonElement>('button[data-loading="true"]')) button.disabled = true;
+}
+
+const loadingHandlers = new WeakMap<HTMLButtonElement, HTMLButtonElement["onclick"]>();
+
+function bindLoadingButtons() {
+  for (const button of document.querySelectorAll<HTMLButtonElement>("button")) {
+    const handler = button.onclick;
+    if (!handler || loadingHandlers.get(button) === handler) continue;
+    const wrapped: HTMLButtonElement["onclick"] = function (event) {
+      if (button.dataset.loading === "true") return;
+      const wasDisabled = button.disabled;
+      const result = handler.call(button, event);
+      if (!result || typeof result.then !== "function") return result;
+      button.dataset.loading = "true";
+      button.setAttribute("aria-busy", "true");
+      button.disabled = true;
+      return Promise.resolve(result).catch((cause: unknown) => {
+        setStatus(cause instanceof Error ? cause.message : "Request failed.");
+      }).finally(() => {
+        delete button.dataset.loading;
+        button.removeAttribute("aria-busy");
+        button.disabled = wasDisabled;
+        renderAutomatic();
+      });
+    };
+    loadingHandlers.set(button, wrapped);
+    button.onclick = wrapped;
+  }
 }
 
 async function send(message: { type: string; enabled?: boolean; apiUrl?: string; code?: string; jobId?: string; mediaConfirmed?: boolean; campaignId?: string }, clear = false) {
   if (sending) return;
   sending = true;
-  setStatus(message.type === "AUTO_START" ? "Starting automation…" : "");
+  statusMessage.setAttribute("aria-busy", "true");
+  setStatus(message.type === "AUTO_START" ? "Starting automation…" : "Please wait…");
   if (message.type === "AUTO_START" || message.type === "AUTO_STOP") renderAutomatic();
   try {
     const result = await chrome.runtime.sendMessage(message) as { ok: boolean; message?: string; error?: string; job?: Job | null };
@@ -175,6 +206,8 @@ async function send(message: { type: string; enabled?: boolean; apiUrl?: string;
     setStatus(cause instanceof Error ? cause.message : "Request failed.");
   } finally {
     sending = false;
+    statusMessage.removeAttribute("aria-busy");
+    if (currentStatus === "Please wait…") setStatus("");
     if (message.type === "PUBLISH") {
       const saved = await chrome.storage.local.get("job");
       if (saved.job) currentJob = saved.job as Job;
@@ -216,7 +249,7 @@ void chrome.storage.local.get(["apiUrl", "deviceToken", "job", "locale", "automa
 });
 
 byId<HTMLButtonElement>("pair").onclick = () => {
-  void (async () => {
+  return (async () => {
     try {
       const url = new URL(apiUrl.value);
       if (url.protocol !== "https:" && url.origin !== "http://localhost:3000") throw new Error("Use HTTPS for the application URL.");
@@ -227,8 +260,8 @@ byId<HTMLButtonElement>("pair").onclick = () => {
     } catch (error) { setStatus(error instanceof Error ? error.message : "Pairing failed."); }
   })();
 };
-byId<HTMLButtonElement>("next").onclick = () => void send({ type: "NEXT" });
-byId<HTMLButtonElement>("disconnect").onclick = () => void send({ type: "DISCONNECT" }).then(() => { showJob(undefined, false); setStatus("Device disconnected from this browser."); });
+byId<HTMLButtonElement>("next").onclick = () => send({ type: "NEXT" });
+byId<HTMLButtonElement>("disconnect").onclick = () => send({ type: "DISCONNECT" }).then(() => { showJob(undefined, false); setStatus("Device disconnected from this browser."); });
 byId<HTMLSelectElement>("language").onchange = async (event) => {
   locale = (event.target as HTMLSelectElement).value === "en" ? "en" : "vi";
   await chrome.storage.local.set({ locale });
@@ -243,21 +276,21 @@ byId<HTMLInputElement>("autoClickPost").onchange = async (event) => {
   renderAutomatic();
 };
 byId<HTMLSelectElement>("autoCampaign").onchange = () => renderAutomatic();
-byId<HTMLButtonElement>("autoRefresh").onclick = () => void refreshCampaigns();
-byId<HTMLButtonElement>("autoStart").onclick = () => void send({ type: "AUTO_START", campaignId: byId<HTMLSelectElement>("autoCampaign").value });
-byId<HTMLButtonElement>("autoStop").onclick = () => void send({ type: "AUTO_STOP" });
+byId<HTMLButtonElement>("autoRefresh").onclick = () => refreshCampaigns();
+byId<HTMLButtonElement>("autoStart").onclick = () => send({ type: "AUTO_START", campaignId: byId<HTMLSelectElement>("autoCampaign").value });
+byId<HTMLButtonElement>("autoStop").onclick = () => send({ type: "AUTO_STOP" });
 byId<HTMLButtonElement>("autoCancel").onclick = () => {
-  if (window.confirm(t("Cancel this campaign? Unposted groups will not continue."))) void send({ type: "AUTO_CANCEL_CAMPAIGN" });
+  if (window.confirm(t("Cancel this campaign? Unposted groups will not continue."))) return send({ type: "AUTO_CANCEL_CAMPAIGN" });
 };
 byId<HTMLButtonElement>("autoReset").onclick = () => {
   if (window.confirm(t("Reset failed groups? Only confirmed failures are reset; uncertain posts stay locked.")))
-    void send({ type: "AUTO_RESET_FAILED" });
+    return send({ type: "AUTO_RESET_FAILED" });
 };
 byId<HTMLButtonElement>("autoConfirm").onclick = () => {
   if (window.confirm(t("Have you checked Facebook and verified that this post is published?")))
-    void send({ type: "AUTO_CONFIRM_POST" });
+    return send({ type: "AUTO_CONFIRM_POST" });
 };
-byId<HTMLButtonElement>("autoRetry").onclick = () => void send({ type: "AUTO_START", campaignId: currentAutomatic?.campaignId });
+byId<HTMLButtonElement>("autoRetry").onclick = () => send({ type: "AUTO_START", campaignId: currentAutomatic?.campaignId });
 byId<HTMLButtonElement>("autoOpen").onclick = async () => {
   try {
     const tabId = currentAutomatic?.tabId;
@@ -280,3 +313,6 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes.job) showJob(changes.job.newValue as Job | undefined, currentConnected);
   renderAutomatic();
 });
+
+
+bindLoadingButtons();
