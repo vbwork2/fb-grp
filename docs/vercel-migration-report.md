@@ -96,3 +96,7 @@ Read [deployment-vercel.md](deployment-vercel.md) before cutover. Preserve old N
 - tests/extension-background.test.ts
 - tests/vercel-auth-media.test.ts
 - tests/vercel-storage.test.ts
+
+## Automatic posting behavior restored on 2026-10-09
+
+The migration commit changed the behavior of f0b103e by enabling preview verification and requiring publication evidence. Restored the explicit automatic switch behavior: wait five seconds before clicking Post, skip preview matching, and wait five seconds after the recorded click before moving on. The API again accepts automatic_unverified only with an audited automatic click; history retains an unverified note and no verified publication timestamp. Vercel storage and origin-scoped extension pairing remain in place.

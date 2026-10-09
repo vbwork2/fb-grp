@@ -2,9 +2,9 @@ import { createServer } from "node:http";
 import { resolve } from "node:path";
 import { test, expect, chromium, type Route } from "@playwright/test";
 
-for (const scenario of [{ legacyPreference: false, autoEnabled: false, publicationConfirmed: true }, { legacyPreference: true, autoEnabled: false, publicationConfirmed: true }, { legacyPreference: false, autoEnabled: true, publicationConfirmed: true }, { legacyPreference: false, autoEnabled: true, publicationConfirmed: false }]) {
-const { legacyPreference, autoEnabled, publicationConfirmed } = scenario;
-test(`assisted campaign with legacy preference ${legacyPreference} and explicit Post switch ${autoEnabled} and confirmation ${publicationConfirmed} proceeds while Facebook resources keep loading`, async () => {
+for (const scenario of [{ legacyPreference: false, autoEnabled: false }, { legacyPreference: true, autoEnabled: false }, { legacyPreference: false, autoEnabled: true }]) {
+const { legacyPreference, autoEnabled } = scenario;
+test(`assisted campaign with legacy preference ${legacyPreference} and explicit Post switch ${autoEnabled} proceeds while Facebook resources keep loading`, async () => {
   test.setTimeout(90_000);
   const campaignId = "11111111-1111-4111-8111-111111111111";
   const caption = "First line\n\nSecond section\nLast line";
@@ -94,7 +94,7 @@ test(`assisted campaign with legacy preference ${legacyPreference} and explicit 
             post.onclick = () => {
               const notice = document.createElement('div');
               notice.setAttribute('role', 'status');
-              notice.textContent = '${publicationConfirmed ? 'Your post was published.' : 'No publication confirmation in this fixture.'}';
+              notice.textContent = '${autoEnabled ? 'No publication confirmation in this fixture.' : 'Your post was published.'}';
               document.body.append(notice);
             };
           };
@@ -148,13 +148,6 @@ test(`assisted campaign with legacy preference ${legacyPreference} and explicit 
       return runtime.runtime.sendMessage({ type: "AUTO_START", campaignId: id });
     }, campaignId);
     expect(start, JSON.stringify(start)).toMatchObject({ ok: true });
-    if (!publicationConfirmed) {
-      await expect.poll(async () => (await state())?.phase, { timeout: 65_000 }).toBe("PAUSED");
-      expect(confirmed).toHaveLength(0);
-      expect(reservations).toHaveLength(1);
-      expect(claimed).toBe(1);
-      return;
-    }
     for (let number = 1; !autoEnabled && number <= groupCount; number++) {
       await expect.poll(async () => {
         const current = await state();

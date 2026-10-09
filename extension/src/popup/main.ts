@@ -90,7 +90,7 @@ function renderAutomatic() {
   byId<HTMLButtonElement>("autoStart").textContent = t(autoClickPost ? "Start automatic posting" : "Start preparing posts");
   byId<HTMLInputElement>("autoClickPost").checked = autoClickPost;
   byId<HTMLInputElement>("autoClickPost").disabled = sending || Boolean(currentAutomatic?.enabled) || Boolean(currentJob?.publishAttempted);
-  byId<HTMLElement>("autoHelp").textContent = t(autoClickPost ? "On: clicks Post after verified preparation and waits for publication confirmation." : "Off: review each prepared post and click Post on Facebook.");
+  byId<HTMLElement>("autoHelp").textContent = t(autoClickPost ? "On: waits 5 seconds, clicks Post without checks, then waits 5 seconds before the next group." : "Off: review each prepared post and click Post on Facebook.");
   const run = currentAutomatic;
   const running = Boolean(run?.enabled);
   const paused = Boolean(run && !run.enabled && run.phase === "PAUSED");

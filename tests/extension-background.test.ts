@@ -223,20 +223,27 @@ describe("manual-confirmed automatic campaign (no three-group limit)", () => {
     expect(tabMessage.mock.calls.some((call) => call[1].type === "PUBLISH_POST")).toBe(false);
   });
 
-  it.each(["unknown", "approval"])("AUTO pauses on %s instead of advancing", async (outcome) => {
+  it.each(["unknown", "approval"])("AUTO continues after five seconds without using the %s outcome", async (outcome) => {
     configure();
+    const original = fetchMock.getMockImplementation()!;
+    let claims = 0;
+    fetchMock.mockImplementation(async (url, init) => String(url).includes("/jobs/next") && ++claims > 1 ? json({ job: null, campaignStatus: "COMPLETED", remaining: 0 }) : original(url, init));
     await send({ type: "AUTO_SET_PUBLISH", enabled: true });
     tabMessage.mockImplementation(async (_tab: number, message: { type: string }) => message.type === "PING" ? { ok: true, url: tabUrl, readyState: "interactive" } : message.type === "PUBLISH_POST" ? { ok: true, clicked: true, outcome } : { ok: true });
     await send({ type: "AUTO_START", campaignId });
-    await vi.waitFor(() => expect(saved.automatic).toMatchObject({ enabled: false, phase: "PAUSED" }));
-    expect(saved.job).toMatchObject({ publishAttempted: true, userClicked: true });
-    expect(tabMessage).toHaveBeenCalledWith(1, expect.objectContaining({ type: "PUBLISH_POST", trackOutcome: true, skipContentVerification: false }));
-    expect(tabMessage.mock.calls.filter(call => call[1].type === "PUBLISH_POST")).toHaveLength(1);
+    await vi.waitFor(() => expect(saved.job).toMatchObject({ userClicked: true, autoContinueAt: expect.any(Number) }));
     expect(fetchMock.mock.calls.some(call => String(call[0]).endsWith("/posted"))).toBe(false);
-    expect(fetchMock.mock.calls.filter(call => String(call[0]).includes("/jobs/next"))).toHaveLength(1);
-  });
+    await vi.waitFor(() => expect(saved.automatic).toMatchObject({ enabled: false, status: "Automatic posting completed." }), { timeout: 8000 });
+    expect(tabMessage).toHaveBeenCalledWith(1, expect.objectContaining({ type: "PREPARE_CAPTION", skipContentVerification: true }));
+    expect(tabMessage).toHaveBeenCalledWith(1, expect.objectContaining({ type: "PUBLISH_POST", trackOutcome: false, skipContentVerification: true }));
+    expect(tabMessage.mock.calls.filter(call => call[1].type === "PUBLISH_POST")).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(call => String(call[0]).endsWith("/posted"))).toHaveLength(1);
+    const completion = fetchMock.mock.calls.find(call => String(call[0]).endsWith("/posted"))!;
+    expect(JSON.parse(String(completion[1]?.body))).toMatchObject({ confirmationSource: "automatic_unverified" });
+    expect(saved.job).toBeUndefined();
+  }, 12_000);
 
-  it("AUTO completes four groups only after publication notices", async () => {
+  it("unchecked AUTO completes four groups without publication notices", async () => {
     configure();
     const original = fetchMock.getMockImplementation()!;
     let claims = 0;
@@ -425,12 +432,12 @@ it("stopping during post-click delay prevents completion and the next group", as
   expect(createTab).not.toHaveBeenCalled();
 });
 
-it("restart pauses a recorded AUTO click without publication evidence", async () => {
+it("restart completes a durably recorded AUTO click without clicking again", async () => {
   saved.job = { ...job, publishAttempted: true, userClicked: true, autoContinueAt: Date.now() - 1 };
   saved.automatic = { runId: "restart-delay", campaignId, enabled: true, autoClickPost: true, phase: "VERIFYING", tabId: 1, jobId: job.id, attempts: 1 };
   fetchMock.mockImplementation(async url => String(url).includes("/jobs/next") ? json({ job: null, campaignStatus: "COMPLETED", remaining: 0 }) : json({ allowed: true }));
   alarmListener({ name: "groupflow-automatic" });
-  await vi.waitFor(() => expect(saved.automatic).toMatchObject({ enabled: false, phase: "PAUSED" }));
-  expect(fetchMock.mock.calls.filter(call => String(call[0]).endsWith("/posted"))).toHaveLength(0);
+  await vi.waitFor(() => expect(saved.automatic).toMatchObject({ enabled: false, status: "Automatic posting completed." }));
+  expect(fetchMock.mock.calls.filter(call => String(call[0]).endsWith("/posted"))).toHaveLength(1);
   expect(tabMessage.mock.calls.some(call => call[1].type === "PUBLISH_POST")).toBe(false);
 });

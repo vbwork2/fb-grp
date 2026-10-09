@@ -260,7 +260,7 @@ async function resetFailed() {
 }
 
 const confirmingPosts = new Set<string>();
-async function recordCompletedPost(run: AutomaticRun, job: Job, note: string, confirmationSource: "ui_confirmed" | "user_confirmed" = "user_confirmed") {
+async function recordCompletedPost(run: AutomaticRun, job: Job, note: string, confirmationSource: "ui_confirmed" | "user_confirmed" | "automatic_unverified" = "user_confirmed") {
   if (confirmingPosts.has(job.id)) return;
   confirmingPosts.add(job.id);
   try {
@@ -274,10 +274,23 @@ async function recordCompletedPost(run: AutomaticRun, job: Job, note: string, co
     // server call was in flight.
     const current = await automaticState();
     if (!current?.enabled || current.runId !== run.runId) return;
-    await updateAutomatic(run, { phase: "WAITING", status: "Post verified. Preparing the next scheduled group.", error: "", groupName: undefined });
+    await updateAutomatic(run, { phase: "WAITING", status: confirmationSource === "automatic_unverified" ? "Post submitted without verification. Preparing the next scheduled group." : "Post verified. Preparing the next scheduled group.", error: "", groupName: undefined });
     void runAutomatic();
   } finally { confirmingPosts.delete(job.id); }
 }
+async function completeUncheckedPost(run: AutomaticRun, job: Job) {
+  if (!job.userClicked || !job.autoContinueAt) throw new Error("The automatic Post click was not recorded. Review Facebook before continuing.");
+  await updateAutomatic(run, { phase: "VERIFYING", status: "Post clicked. Waiting 5 seconds before the next group; publication is not checked." });
+  while (Date.now() < job.autoContinueAt) {
+    await active(run);
+    await new Promise(resolve => setTimeout(resolve, Math.min(250, job.autoContinueAt! - Date.now())));
+  }
+  await active(run);
+  const current = (await settings()).job;
+  if (current?.id !== job.id || !current.userClicked) return;
+  await recordCompletedPost(run, current, "Automatic submission (unverified). Post was clicked; Facebook publication was not checked.", "automatic_unverified");
+}
+
 async function confirmPostManually() {
   const run = await automaticState();
   const job = (await settings()).job;
@@ -298,8 +311,8 @@ async function userClickedPost(jobId: string | undefined, tabId: number | undefi
   const [run, saved] = await Promise.all([automaticState(), settings()]);
   if (!run || !matchingActivePost(jobId, tabId, run, saved.job) || !(run.phase === "AWAITING_USER" || (run.autoClickPost && run.phase === "VERIFYING" && !saved.job?.userClicked)))
     throw new Error("This posting session is no longer active.");
-  await chrome.storage.local.set({ job: { ...saved.job, userClicked: true } });
-  await updateAutomatic(run, { phase: "VERIFYING", status: clickSource === "automatic" ? "Post clicked. Waiting for Facebook publication confirmation." : "You clicked Post. Waiting for Facebook confirmation." });
+  await chrome.storage.local.set({ job: { ...saved.job, userClicked: true, ...(clickSource === "automatic" ? { autoContinueAt: Date.now() + 5000 } : {}) } });
+  await updateAutomatic(run, { phase: "VERIFYING", status: clickSource === "automatic" ? "Post clicked. Waiting 5 seconds before the next group; publication is not checked." : "You clicked Post. Waiting for Facebook confirmation." });
   try {
     await api(`/api/extension/jobs/${saved.job!.id}/submission`, { claimToken: saved.job!.claimToken, action: "clicked", clickSource });
   } catch (cause) {
@@ -378,6 +391,12 @@ async function runAutomatic() {
   try {
     // Never start another group while the user is reviewing or Facebook's
     // outcome is uncertain (also holds after a service-worker restart).
+    if (run.autoClickPost && run.phase === "VERIFYING") {
+      const job = (await settings()).job;
+      if (job && job.id === run.jobId && job.userClicked && job.autoContinueAt) {
+        await completeUncheckedPost(run, job); return;
+      }
+    }
     if (["AWAITING_USER", "VERIFYING"].includes(run.phase)) {
       if (run.jobId && run.tabId && watchedJobs.has(run.jobId)) {
         const job = (await settings()).job;
@@ -433,7 +452,7 @@ async function runAutomatic() {
     }
     const prepared = await chrome.tabs.sendMessage(tab.id, {
       type: "PREPARE_CAPTION", jobId: job.id, expectedGroupUrl: job.group.url,
-      caption: job.content.caption, linkUrl: job.content.linkUrl, attachments, allowUnverifiedImages: !run.autoClickPost, skipContentVerification: false,
+      caption: job.content.caption, linkUrl: job.content.linkUrl, attachments, allowUnverifiedImages: !run.autoClickPost, skipContentVerification: run.autoClickPost === true,
     }) as { ok?: boolean; message?: string; reason?: string; warning?: string; clicked?: boolean; diagnostics?: Record<string, unknown> };
     if (prepared?.diagnostics) await chrome.storage.local.set({ uploadDiagnostics: prepared.diagnostics });
     if (!prepared?.ok && prepared?.clicked) {
@@ -461,11 +480,11 @@ async function runAutomatic() {
     }
     if (run.autoClickPost) {
       await active(run);
-      await updateAutomatic(run, { phase: "VERIFYING", status: "Automatically clicking Post. Waiting for Facebook confirmation." });
+      await updateAutomatic(run, { phase: "VERIFYING", status: "Automatically clicking Post. Publication will not be checked." });
       const result = await chrome.tabs.sendMessage(tab.id, {
         type: "PUBLISH_POST", jobId: job.id, expectedGroupUrl: job.group.url,
         caption: job.content.caption, linkUrl: job.content.linkUrl,
-        attachments, trackOutcome: true, skipContentVerification: false,
+        attachments, trackOutcome: false, skipContentVerification: true,
       }) as { ok?: boolean; clicked?: boolean; outcome?: string; reason?: string; message?: string };
       await active(run);
       const latestJob = (await settings()).job;
@@ -478,7 +497,7 @@ async function runAutomatic() {
       if (!result?.ok || !result.clicked) throw Object.assign(new Error(result?.message ?? "The Facebook action could not be verified. Check Facebook before continuing."), { code: result?.reason ?? "POST_OUTCOME_UNKNOWN" });
       if (!latestJob?.userClicked) await userClickedPost(job.id, tab.id, "automatic");
       const submitted = (await settings()).job;
-      if (submitted?.id === job.id) await userPostResult(job.id, result.outcome ?? "unknown", tab.id);
+      if (submitted?.id === job.id) await completeUncheckedPost(run, submitted);
     }
   } catch (cause) {
     const state = await automaticState();
