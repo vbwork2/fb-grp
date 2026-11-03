@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createMediaStorageKey } from "@/lib/storage/keys";
 import { getMedia, putMedia, deleteMedia } from "@/lib/storage";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -44,7 +44,7 @@ export async function editCampaign(id: string, identity: { workspaceId: string; 
         for (const image of images) {
           const bytes = await getMedia(image.storageKey);
           if (!bytes) throw new Error("Unable to copy this content's images.");
-          const key = randomUUID();
+          const key = createMediaStorageKey();
           copiedKeys.push(key);
           await putMedia(key, bytes, { mimeType: image.mimeType });
           await tx.insert(media).values({

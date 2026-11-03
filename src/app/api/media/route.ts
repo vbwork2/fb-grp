@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createMediaStorageKey } from "@/lib/storage/keys";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { contents, media } from "@/lib/db/schema";
@@ -27,7 +27,7 @@ export async function POST(request: Request) {
     const [owned] = await db.select({ id: contents.id }).from(contents).where(and(eq(contents.id, contentId), eq(contents.workspaceId, identity.workspaceId))).limit(1);
     if (!owned) return jsonError("RESOURCE_NOT_FOUND", "Content not found.", 404);
   }
-  const key = randomUUID();
+  const key = createMediaStorageKey();
   try { await putMedia(key, bytes, { mimeType }); } catch {
     return jsonError("STORAGE_UNAVAILABLE", "Unable to store image. Try again.", 503);
   }

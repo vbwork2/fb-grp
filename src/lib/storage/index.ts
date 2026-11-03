@@ -2,6 +2,7 @@ import "server-only";
 import { del, get, put } from "@vercel/blob";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
+import { deleteB2Media, getB2Media, putB2Media } from "./b2";
 
 const localRoot = join(process.cwd(), ".local-storage", "media");
 
@@ -16,6 +17,7 @@ function storagePath(key: string): string {
 export async function putMedia(key: string, value: Uint8Array, metadata: Record<string, string>): Promise<void> {
   const target = storagePath(key);
   if (process.env.NODE_ENV === "production") {
+    if (key.startsWith("b2_")) return putB2Media(key, value, metadata.mimeType);
     await put(key, value.slice().buffer as ArrayBuffer, {
       access: "private", addRandomSuffix: false, allowOverwrite: false,
       contentType: metadata.mimeType,
@@ -29,6 +31,7 @@ export async function putMedia(key: string, value: Uint8Array, metadata: Record<
 export async function getMedia(key: string): Promise<Uint8Array | null> {
   const target = storagePath(key);
   if (process.env.NODE_ENV === "production") {
+    if (key.startsWith("b2_")) return getB2Media(key);
     // The SDK authenticates the private read; never redirect to a storage URL.
     const result = await get(key, { access: "private", useCache: false });
     if (!result) return null;
@@ -43,6 +46,7 @@ export async function getMedia(key: string): Promise<Uint8Array | null> {
 
 export async function deleteMedia(key: string): Promise<void> {
   const target = storagePath(key);
+  if (process.env.NODE_ENV === "production" && key.startsWith("b2_")) return deleteB2Media(key);
   if (process.env.NODE_ENV === "production") { await del(key); return; }
   try { await unlink(target); } catch (error) {
     // An already missing file does not prevent removing its metadata.

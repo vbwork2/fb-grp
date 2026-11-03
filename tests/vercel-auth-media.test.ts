@@ -87,13 +87,15 @@ it("pairs once, stores only a token hash and rejects expired and revoked devices
   expect((await revoke.DELETE(request("/api/devices", { id: paired.deviceId }, "DELETE"))).status).toBe(200); expect(await getDevice(authorization)).toBeNull();
 });
 
-it("uploads private media and checks session and device workspace before fetching bytes", async () => {
+it.each(["vercel", "b2"])("uploads private media with %s and checks session and device workspace before fetching bytes", async (provider) => {
+  vi.stubEnv("MEDIA_STORAGE_PROVIDER", provider);
   const owner = await register(); const ownerCookie = state.cookie;
   const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   const form = new FormData(); form.set("file", new File([bytes], "fixture.png", { type: "image/png" }));
   const upload = await import("../src/app/api/media/route");
   const result = await upload.POST(new Request("https://app.example/api/media", { method: "POST", headers: { origin: "https://app.example", host: "app.example" }, body: form }));
   expect(result.status).toBe(201); const image = (await result.json()).data;
+  expect(image.storageKey.startsWith("b2_")).toBe(provider === "b2");
   const context = { params: Promise.resolve({ id: image.id }) };
   const route = await import("../src/app/api/media/[id]/route");
   const response = await route.GET(request("/api/media/" + image.id, undefined, "GET"), context);

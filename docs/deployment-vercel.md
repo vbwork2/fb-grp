@@ -1,5 +1,7 @@
 # Vercel deployment
 
+For the temporary private Backblaze B2 upload provider, see [Backblaze setup and cutover](storage-backblaze.md). Legacy images remain on Vercel Blob.
+
 ## Project and architecture
 
 Import vbwork2/fb-grp into ONE Vercel project. Framework preset: Next.js; Root Directory: .; Node.js: 24.x; install: npm install; build: npm run build. Keep the default Next.js output setting. No vercel.json, extra service, static export, container or always-on worker is required.

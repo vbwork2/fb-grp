@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "storage:check": "tsx scripts/check-b2-storage.ts",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:acceptance": "tsx scripts/run-acceptance.ts",
@@ -18,11 +19,12 @@
     "extension:build": "npm --prefix extension run build"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1161.0",
     "@hookform/resolvers": "^5.9.1",
     "@vercel/blob": "^2.8.1",
     "csv-parse": "^7.0.3",
     "drizzle-orm": "^1.0.0-rc.4",
-    "next": "16.4.0",
+    "next": "16.4.4",
     "postgres": "^3.4.9",
     "react": "19.3.0",
     "react-dom": "19.3.0",
