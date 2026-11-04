@@ -1,5 +1,7 @@
 "use client";
 
+import { workspaceFetch } from "@/lib/workspace-fetch";
+
 import { ActionButton, ActionForm } from "@/components/loading";
 import { Modal } from "@/components/modal";
 
@@ -11,7 +13,7 @@ type Content = { id: string; name: string; body: string; linkUrl: string | null 
 type Campaign = { id: string; name: string; contentId: string; minIntervalSeconds: number; maxIntervalSeconds: number };
 
 async function saveResource<T>(url: string, body: unknown, method = "POST"): Promise<T> {
-  const response = await fetch(url, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const response = await workspaceFetch(url, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const result = await response.json();
   if (!response.ok || result.error) throw new Error(result.error?.message ?? "Unable to save changes.");
   return result.data as T;

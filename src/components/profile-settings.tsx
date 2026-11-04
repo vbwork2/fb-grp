@@ -1,5 +1,7 @@
 "use client";
 
+import { workspaceFetch } from "@/lib/workspace-fetch";
+
 import { ActionButton, ActionForm } from "@/components/loading";
 
 import { T } from "@/components/language-provider";
@@ -19,7 +21,7 @@ export default function ProfileSettings({ displayName }: { displayName: string }
     const form = new FormData(event.currentTarget);
     const payload = Object.fromEntries(form.entries());
     try {
-      const response = await fetch("/api/profile", {
+      const response = await workspaceFetch("/api/profile", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),

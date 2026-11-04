@@ -34,8 +34,8 @@ test.beforeAll(async () => {
     plugins: [{ name: "fixture-navigation", setup(builder) {
       builder.onResolve({ filter: /^next\/(navigation|link)$/ }, ({ path }) => ({ path, namespace: "fixture" }));
       builder.onLoad({ filter: /.*/, namespace: "fixture" }, ({ path }) => ({ resolveDir: process.cwd(), contents: path.endsWith("link")
-        ? 'import React from "react"; export default function Link(props){return React.createElement("a",props)}'
-        : 'export function usePathname(){return "/campaigns"} export function useRouter(){return {replace(){},refresh(){}}}' }));
+        ? 'import React from "react"; export default function Link({prefetch,...props}){return React.createElement("a",props)}'
+        : 'const router = {replace(){},refresh(){window.workspaceRefreshes = (window.workspaceRefreshes || 0) + 1}}; export function usePathname(){return "/campaigns"} export function useRouter(){return router}' }));
     } }],
   });
   bundle = result.outputFiles[0].text;
@@ -105,6 +105,7 @@ test("three-step creation validates fields, preserves choices and submits once",
   await expect(page.locator("#campaign-composer")).toBeHidden();
   await expect(page.locator("#campaign-feedback")).toBeFocused();
   await expect(page.getByRole("link", { name: "Open campaign", exact: true })).toHaveAttribute("href", "/campaigns/created");
+  expect(await page.evaluate(() => (window as unknown as { workspaceRefreshes: number }).workspaceRefreshes)).toBe(1);
   expect(errors).toEqual([]);
 });
 
@@ -137,6 +138,7 @@ test("failed saves preserve the draft and allow a retry", async ({ page }) => {
     : { status: 201, json: { data: { id: "retry", ...route.request().postDataJSON(), status: "READY", createdAt: "2026-11-03" }, error: null } }));
   await page.getByRole("button", { name: "Create campaign", exact: true }).click();
   await expect(page.getByRole("alert")).toHaveText("Unable to create campaign.");
+  expect(await page.evaluate(() => (window as unknown as { workspaceRefreshes?: number }).workspaceRefreshes ?? 0)).toBe(0);
   await page.getByRole("button", { name: "Back", exact: true }).click();
   await expect(page.getByRole("checkbox", { name: "Alpha" })).toBeChecked();
   await page.getByRole("button", { name: "Continue", exact: true }).click();
@@ -204,16 +206,23 @@ test("desktop sidebar stays fixed and collapse expands the usable workspace", as
   await page.evaluate(() => window.scrollTo(0, 800));
   expect((await sidebar.boundingBox())!.y).toBe(0);
   await page.getByRole("button", { name: "Collapse sidebar", exact: true }).click();
-  await expect.poll(async () => Math.round((await sidebar.boundingBox())!.width)).toBe(112);
-  await expect.poll(async () => Math.round((await page.locator(".main").boundingBox())!.x)).toBe(112);
+  await expect.poll(async () => Math.round((await sidebar.boundingBox())!.width)).toBe(72);
+  await expect.poll(async () => Math.round((await page.locator(".main").boundingBox())!.x)).toBe(72);
   await expect(page.getByRole("button", { name: "Expand sidebar", exact: true })).toHaveAttribute("aria-expanded", "false");
   await expect(sidebar.getByRole("link", { name: "Campaigns", exact: true })).toBeVisible();
   await expect(sidebar.getByRole("link", { name: "Settings", exact: true })).toBeVisible();
+  for (const link of await sidebar.locator(".nav a").all()) {
+    await expect(link.locator(".nav-icon")).toBeVisible();
+    await expect(link.locator(".nav-label-text")).toBeHidden();
+  }
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ animations: "disabled", path: "test-results/sidebar-collapsed-desktop.png" });
   await page.getByRole("button", { name: "Expand sidebar", exact: true }).click();
   await expect.poll(async () => Math.round((await sidebar.boundingBox())!.width)).toBe(260);
   await expect.poll(async () => Math.round((await page.locator(".main").boundingBox())!.x)).toBe(260);
+  for (const label of await sidebar.locator(".nav-label-text").all()) {
+    await expect(label).toBeVisible();
+  }
   await page.screenshot({ animations: "disabled", path: "test-results/sidebar-expanded-desktop.png" });
 });
 

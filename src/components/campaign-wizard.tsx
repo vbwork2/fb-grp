@@ -1,5 +1,7 @@
 "use client";
 
+import { workspaceFetch } from "@/lib/workspace-fetch";
+
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { LoadingDots } from "@/components/loading";
 import { T, LocalizedInput, useLocale } from "@/components/language-provider";
@@ -104,7 +106,7 @@ export function CampaignWizard({ groups, contents, onCreated }: {
     locked.current = true;
     setBusy(true);
     try {
-      const response = await fetch("/api/campaigns", {
+      const response = await workspaceFetch("/api/campaigns", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ name: name.trim(), contentId, groupIds: selectedGroups.map((group) => group.id), variantStrategy,
           minIntervalSeconds: minimum, maxIntervalSeconds: maximum,

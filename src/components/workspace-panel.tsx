@@ -1,5 +1,7 @@
 "use client";
 
+import { workspaceFetch } from "@/lib/workspace-fetch";
+
 import { ActionButton, ActionForm, LoadingDots, LoadingStatus } from "@/components/loading";
 
 import { T, LocalizedInput, LocalizedTextarea } from "@/components/language-provider";
@@ -48,7 +50,7 @@ type Campaign = {
 type ApiResult<T> = { data: T | null; error: { message: string } | null };
 
 async function request<T>(url: string, body?: unknown, method?: string): Promise<T> {
-  const response = await fetch(
+  const response = await workspaceFetch(
     url,
     body
       ? {
@@ -136,7 +138,7 @@ export function GroupsPanel({ initialGroups }: { initialGroups: Group[] }) {
     const form = new FormData();
     form.set("file", file);
     try {
-      const response = await fetch("/api/groups/import", { method: "POST", body: form });
+      const response = await workspaceFetch("/api/groups/import", { method: "POST", body: form });
       const result = (await response.json()) as ApiResult<{
         total: number;
         imported: number;
@@ -578,7 +580,7 @@ export function ContentPanel({ initialContents, initialMedia = {}, maxUploadMega
     const form = new FormData();
     form.set("file", file);
     form.set("contentId", contentId);
-    const response = await fetch("/api/media", { method: "POST", body: form });
+    const response = await workspaceFetch("/api/media", { method: "POST", body: form });
     const result = (await response.json()) as ApiResult<MediaItem>;
     if (!response.ok || !result.data) throw new Error(result.error?.message ?? "Unable to upload file.");
     const image = result.data;

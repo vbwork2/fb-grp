@@ -1,5 +1,7 @@
 "use client";
 
+import { workspaceFetch } from "@/lib/workspace-fetch";
+
 import { ActionButton } from "@/components/loading";
 
 import { T } from "@/components/language-provider";
@@ -20,7 +22,7 @@ export default function DeviceList({ initialDevices }: { initialDevices: Device[
   const [revoking, setRevoking] = useState<Device | null>(null);
 
   async function revoke(id: string) {
-    const response = await fetch("/api/devices", {
+    const response = await workspaceFetch("/api/devices", {
       method: "DELETE",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ id }),

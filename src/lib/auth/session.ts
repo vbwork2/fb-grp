@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { and, eq } from "drizzle-orm";
@@ -32,7 +33,8 @@ export async function clearSession(): Promise<void> {
   (await cookies()).set(cookieName, "", { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/", maxAge: 0 });
 }
 
-export async function getIdentity() {
+// Deduplicate identity lookups within one server render, never across requests.
+export const getIdentity = cache(async function getIdentity() {
   const raw = (await cookies()).get(cookieName)?.value;
   if (!raw) return null;
   const [payload, signature] = raw.split(".");
@@ -51,7 +53,7 @@ export async function getIdentity() {
   } catch {
     return null;
   }
-}
+});
 
 export async function requireIdentity() {
   const identity = await getIdentity();
