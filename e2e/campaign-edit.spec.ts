@@ -39,7 +39,7 @@ test("campaign editor adds, edits and removes groups and replaces content", asyn
     await page.locator("#campaignGroupUrl").fill(`https://www.facebook.com/groups/new-${run}/`);
     await page.getByRole("button", { name: "Save group", exact: true }).click();
     await expect(page.getByRole("status")).toHaveText("Group saved. Save the campaign to apply your selection.");
-    const editor = page.getByRole("region", { name: "Edit campaign" });
+    const editor = page.getByRole("dialog", { name: "Edit campaign", exact: true });
     const firstRow = editor.locator(".row").filter({ has: page.getByText("Original group", { exact: true }) });
     await firstRow.getByRole("button", { name: "Remove from campaign", exact: true }).click();
     await firstRow.getByRole("button", { name: "Edit group", exact: true }).click();

@@ -7,7 +7,7 @@ import { checkRateLimit } from "@/lib/security/rate-limit";
 import { jsonError, jsonSuccess, verifySameOrigin } from "@/lib/security/http";
 import { deleteMedia, putMedia } from "@/lib/storage";
 import { config } from "@/lib/config";
-import { validateImageUpload } from "@/lib/validators/media";
+import { validateMediaUpload } from "@/lib/validators/media";
 
 export async function POST(request: Request) {
   if (!verifySameOrigin(request)) return jsonError("INVALID_ORIGIN", "Request origin is not allowed.", 403);
@@ -19,17 +19,17 @@ export async function POST(request: Request) {
   const form = await request.formData().catch(() => null);
   const file = form?.get("file");
   const contentId = form?.get("contentId");
-  if (!(file instanceof File) || file.size > config.maxUploadSizeBytes || file.size === 0) return jsonError("INVALID_FILE", `Choose an image up to ${Math.round(config.maxUploadSizeBytes / 1024 / 1024)} MB.`);
+  if (!(file instanceof File) || file.size > config.maxUploadSizeBytes || file.size === 0) return jsonError("INVALID_FILE", `Choose an image or PDF up to ${Math.round(config.maxUploadSizeBytes / 1024 / 1024)} MB.`);
   const bytes = new Uint8Array(await file.arrayBuffer());
   const mimeType = file.type;
-  if (!validateImageUpload(bytes, mimeType, file.name, file.size, config.maxUploadSizeBytes)) return jsonError("INVALID_FILE", "Upload a valid JPG, PNG, or WebP image.");
+  if (!validateMediaUpload(bytes, mimeType, file.name, file.size, config.maxUploadSizeBytes)) return jsonError("INVALID_FILE", "Upload a valid JPG, PNG, WebP, or PDF file.");
   if (typeof contentId === "string" && contentId) {
     const [owned] = await db.select({ id: contents.id }).from(contents).where(and(eq(contents.id, contentId), eq(contents.workspaceId, identity.workspaceId))).limit(1);
     if (!owned) return jsonError("RESOURCE_NOT_FOUND", "Content not found.", 404);
   }
   const key = createMediaStorageKey();
   try { await putMedia(key, bytes, { mimeType }); } catch {
-    return jsonError("STORAGE_UNAVAILABLE", "Unable to store image. Try again.", 503);
+    return jsonError("STORAGE_UNAVAILABLE", "Unable to store file. Try again.", 503);
   }
   try {
     const [created] = await db.insert(media).values({ workspaceId: identity.workspaceId, contentId: typeof contentId === "string" ? contentId || null : null, storageKey: key, mimeType, originalFilename: file.name.replace(/[\\/\0]/g, "").slice(0, 255), sizeBytes: file.size }).returning();
@@ -37,6 +37,6 @@ export async function POST(request: Request) {
   } catch {
     // Remove only the newly uploaded object when metadata could not be saved.
     await deleteMedia(key).catch(() => undefined);
-    return jsonError("UPLOAD_FAILED", "Unable to save image. Try again.", 503);
+    return jsonError("UPLOAD_FAILED", "Unable to save file. Try again.", 503);
   }
 }

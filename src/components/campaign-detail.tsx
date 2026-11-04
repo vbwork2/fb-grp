@@ -109,7 +109,7 @@ export default function CampaignDetail({
   return (
     <>
       <div className="panel">
-        <div className="panel-head"><h2><T>{"Campaign settings"}</T></h2><ActionButton type="button" className="button" disabled={busy || !["READY", "PAUSED"].includes(status)} onClick={() => setEditing((current) => !current)} aria-expanded={editing}><T>{"Edit campaign"}</T></ActionButton></div>
+        <div className="panel-head"><h2><T>{"Campaign settings"}</T></h2><ActionButton type="button" className="button" disabled={busy || !["READY", "PAUSED"].includes(status)} onClick={() => setEditing((current) => !current)} aria-haspopup="dialog"><T>{"Edit campaign"}</T></ActionButton></div>
         {!["READY", "PAUSED"].includes(status) && <p className="muted" style={{ padding: "0 20px 20px" }}><T>{"Pause the campaign before editing. Completed or cancelled campaigns cannot be edited."}</T></p>}
       </div>
       {editing && ["READY", "PAUSED"].includes(status) && <CampaignEditor campaign={campaign} selectedGroupIds={groups.map((group) => group.id)} availableGroups={availableGroups} availableContents={availableContents} onClose={() => setEditing(false)} />}

@@ -1,6 +1,5 @@
 import { build } from "esbuild";
-import { readFile, readdir } from "node:fs/promises";
-import { resolve } from "node:path";
+import { readFile } from "node:fs/promises";
 import { test, expect, type Page } from "@playwright/test";
 let bundle: string;
 test.beforeAll(async () => {
@@ -17,7 +16,10 @@ test.beforeAll(async () => {
     define: { "process.env.NODE_ENV": '"production"' },
     plugins: [{ name: "router", setup(builder) {
       builder.onResolve({ filter: /^next\/navigation$/ }, () => ({ path: "router", namespace: "fixture" }));
-      builder.onLoad({ filter: /.*/, namespace: "fixture" }, () => ({ contents: "export function useRouter(){return {replace(){},refresh(){}}}" }));
+      builder.onResolve({ filter: /^next\/link$/ }, () => ({ path: "link", namespace: "fixture" }));
+      builder.onLoad({ filter: /.*/, namespace: "fixture" }, ({ path }) => ({ resolveDir: process.cwd(), contents: path === "link"
+        ? 'import React from "react"; export default function Link(props){return React.createElement("a",props)}'
+        : "export function useRouter(){return {replace(){},refresh(){}}}" }));
     }}],
   });
   bundle = result.outputFiles[0].text;
@@ -30,63 +32,98 @@ async function mount(page: Page, campaign = false) {
   await page.addScriptTag({ content: bundle });
 }
 const row = (page: Page, name: string) => page.getByRole("row").filter({ has: page.getByText(name, { exact: true }) });
-test("group editor opens directly below the selected row and saves there", async ({ page }) => {
+test("group editor opens in a modal and updates the row after saving", async ({ page }) => {
   await mount(page);
   await page.route("**/api/groups/group-0", (route) => route.fulfill({ json: { data: { id: "group-0", name: "Updated Alpha", facebookUrl: "https://www.facebook.com/groups/updated/", category: "Updated", status: "ACTIVE", lastPostedAt: null }, error: null } }));
-  await row(page, "Alpha").getByRole("button", { name: "Edit", exact: true }).click();
-  const editor = page.locator("#group-editor-group-0");
-  expect(await editor.evaluate((element) => element.previousElementSibling?.textContent)).toContain("Alpha");
+  const trigger = row(page, "Alpha").getByRole("button", { name: "Edit", exact: true });
+  const position = await row(page, "Beta").evaluate((element) => element.getBoundingClientRect().top + window.scrollY);
+  await trigger.click();
+  const editor = page.getByRole("dialog", { name: "Edit group", exact: true });
+  await expect(editor).toBeVisible();
+  expect(await row(page, "Beta").evaluate((element) => element.getBoundingClientRect().top + window.scrollY)).toEqual(position);
   await expect(editor.getByLabel("Name", { exact: true })).toHaveValue("Alpha");
-  let cssRoot = resolve(".next/static/chunks");
-  let files: string[];
-  try { files = await readdir(cssRoot); }
-  catch { cssRoot = resolve(".next/dev/static/chunks"); files = await readdir(cssRoot); }
-  for (const file of files.filter((name) => name.endsWith(".css"))) {
-    await page.addStyleTag({ content: await readFile(resolve(cssRoot, file), "utf8") });
-  }
-  await page.evaluate(() => { document.getElementById("root")!.style.cssText = "max-width:1100px;margin:0 auto;padding:24px"; });
-  await page.screenshot({ path: "docs/repair-evidence/group-inline-editor.png", fullPage: true });
   await editor.getByLabel("Name", { exact: true }).fill("Updated Alpha");
   await editor.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(row(page, "Updated Alpha")).toBeVisible();
   await expect(editor).toHaveCount(0);
-  await expect(row(page, "Beta")).toBeVisible();
 });
-test("switching the selected group resets the editor to the correct item", async ({ page }) => {
+
+test("Escape closes the editor and restores focus before editing another group", async ({ page }) => {
   await mount(page);
-  await row(page, "Alpha").getByRole("button", { name: "Edit", exact: true }).click();
-  await page.locator("#group-editor-group-0").getByLabel("Name", { exact: true }).fill("Unsaved Alpha");
+  const trigger = row(page, "Alpha").getByRole("button", { name: "Edit", exact: true });
+  await trigger.click();
+  const editor = page.getByRole("dialog", { name: "Edit group", exact: true });
+  await editor.getByLabel("Name", { exact: true }).fill("Unsaved Alpha");
+  await page.keyboard.press("Escape");
+  await expect(editor).toHaveCount(0);
+  await expect(trigger).toBeFocused();
   await row(page, "Beta").getByRole("button", { name: "Edit", exact: true }).click();
-  await expect(page.locator("#group-editor-group-0")).toHaveCount(0);
-  await expect(page.locator("#group-editor-group-1").getByLabel("Name", { exact: true })).toHaveValue("Beta");
-  await page.locator("#group-editor-group-1").getByRole("button", { name: "Close", exact: true }).click();
-  await expect(page.locator("#group-editor-group-1")).toHaveCount(0);
+  await expect(editor.getByLabel("Name", { exact: true })).toHaveValue("Beta");
+  await editor.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(editor).toHaveCount(0);
 });
-test("failed group edit keeps the draft beneath the selected row", async ({ page }) => {
+
+test("failed group edit retains the draft inside the popup", async ({ page }) => {
   await mount(page);
   await page.route("**/api/groups/group-0", (route) => route.fulfill({ status: 500, json: { data: null, error: { message: "Unable to update group." } } }));
   await row(page, "Alpha").getByRole("button", { name: "Edit", exact: true }).click();
-  const editor = page.locator("#group-editor-group-0");
+  const editor = page.getByRole("dialog", { name: "Edit group", exact: true });
   await editor.getByLabel("Name", { exact: true }).fill("Unsaved Alpha");
   await editor.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(editor.getByRole("alert")).toContainText("Unable to update group.");
   await expect(editor.getByLabel("Name", { exact: true })).toHaveValue("Unsaved Alpha");
-  await expect(row(page, "Alpha")).toBeVisible();
 });
-test("campaign group editor stays inside the selected group and new group form stays below Add", async ({ page }) => {
+
+test("campaign group popup closes back to the campaign draft", async ({ page }) => {
   await mount(page, true);
-  const alpha = page.locator(".row").filter({ has: page.getByText("Alpha", { exact: true }) });
-  const beta = page.locator(".row").filter({ has: page.getByText("Beta", { exact: true }) });
+  const campaign = page.getByRole("dialog", { name: "Edit campaign", exact: true });
+  await campaign.getByLabel("Campaign name", { exact: true }).fill("Unsaved campaign");
+  const alpha = campaign.locator(".row").filter({ has: page.getByText("Alpha", { exact: true }) });
   await alpha.getByRole("button", { name: "Edit group", exact: true }).click();
-  await expect(alpha.getByLabel("Group name", { exact: true })).toHaveValue("Alpha");
-  await beta.getByRole("button", { name: "Edit group", exact: true }).click();
-  await expect(alpha.getByLabel("Group name", { exact: true })).toHaveCount(0);
-  await expect(beta.getByLabel("Group name", { exact: true })).toHaveValue("Beta");
-  await beta.getByRole("button", { name: "Close", exact: true }).click();
-  await page.getByRole("button", { name: "Add a Facebook Group", exact: true }).click();
-  await expect(page.getByLabel("Group name", { exact: true })).toHaveValue("");
-  const groupForm = page.locator(".form").filter({ has: page.locator("#campaignGroupName") }).last();
-  expect(await groupForm.evaluate((element) => element.previousElementSibling?.textContent)).toContain("Selected groups");
+  const group = page.getByRole("dialog", { name: "Edit group", exact: true });
+  await expect(group.getByLabel("Group name", { exact: true })).toHaveValue("Alpha");
+  await page.keyboard.press("Escape");
+  await expect(group).toHaveCount(0);
+  await expect(campaign).toBeVisible();
+  await expect(campaign.getByLabel("Campaign name", { exact: true })).toHaveValue("Unsaved campaign");
+  await campaign.getByRole("button", { name: "Add a Facebook Group", exact: true }).click();
+  const add = page.getByRole("dialog", { name: "Add a Facebook Group", exact: true });
+  await expect(add.getByLabel("Group name", { exact: true })).toHaveValue("");
+  await add.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(campaign.getByLabel("Campaign name", { exact: true })).toHaveValue("Unsaved campaign");
+});
+
+test("group deletion requires confirmation and cancel keeps the row", async ({ page }) => {
+  await mount(page);
+  let requests = 0;
+  await page.route("**/api/groups/group-0", (route) => { requests++; return route.fulfill({ json: { data: {}, error: null } }); });
+  const trigger = row(page, "Alpha").getByRole("button", { name: "Delete", exact: true });
+  await trigger.click();
+  const confirm = page.getByRole("dialog", { name: "Delete group", exact: true });
+  await expect(confirm).toContainText("Alpha");
+  await confirm.getByRole("button", { name: "Cancel", exact: true }).click();
+  expect(requests).toBe(0);
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  await confirm.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(row(page, "Alpha")).toHaveCount(0);
+  expect(requests).toBe(1);
+});
+
+test("mobile popup stays within the viewport and traps keyboard focus", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 667 });
+  await mount(page);
+  await row(page, "Alpha").getByRole("button", { name: "Edit", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "Edit group", exact: true });
+  const bounds = (await editor.boundingBox())!;
+  expect(bounds.x).toBeGreaterThanOrEqual(0);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(375);
+  expect(bounds.y + bounds.height).toBeLessThanOrEqual(667);
+  for (let index = 0; index < 12; index++) {
+    await page.keyboard.press("Tab");
+    expect(await editor.evaluate((element) => element.contains(document.activeElement) || document.activeElement === document.body)).toBe(true);
+  }
+  await page.screenshot({ path: "docs/repair-evidence/group-popup-mobile.png", fullPage: true });
 });
 
 
@@ -137,4 +174,25 @@ test("form loading blocks a second submit and retains input after a failed save"
   await expect(form.getByRole("button", { name: "Add group", exact: true })).toBeEnabled();
   await expect(form.locator('[name="name"]')).toHaveValue("New group");
   await expect(form.getByRole("alert")).toContainText("Unable to add the group.");
+});
+
+
+test("saving a group prevents dismissal until the request finishes", async ({ page }) => {
+  await mount(page);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/groups/group-0", async (route) => {
+    await gate;
+    await route.fulfill({ status: 500, json: { data: null, error: { message: "Unable to update group." } } });
+  });
+  await row(page, "Alpha").getByRole("button", { name: "Edit", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "Edit group", exact: true });
+  await editor.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(editor.getByRole("button", { name: "Close", exact: true })).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await expect(editor).toBeVisible();
+  release();
+  await expect(editor.getByRole("alert")).toBeVisible();
+  await editor.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(editor).toHaveCount(0);
 });

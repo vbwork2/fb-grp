@@ -1,4 +1,5 @@
 import { T } from "@/components/language-provider";
+import Link from "next/link";
 import { and, asc, count, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { campaigns, groups, queueItems } from "@/lib/db/schema";
@@ -139,6 +140,7 @@ export default async function QueuePage({
           <button className="button small primary">
             <T>{"Filter"}</T>
           </button>
+          {filterParams.size > 0 && <Link href="/queue" className="button small"><T>{"Clear filters"}</T></Link>}
         </form>
 
         {rows.length === 0 ? (

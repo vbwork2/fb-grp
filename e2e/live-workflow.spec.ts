@@ -151,12 +151,12 @@ test("authenticated workflows, tenant isolation, device claims, and password res
       await expect(page).toHaveURL(/status=PENDING/);
       await page.locator("#app-language").selectOption("en");
       await page.goto("/campaigns");
+      await page.getByRole("button", { name: "New campaign", exact: true }).click();
       await page.locator("#wizardCampaignName").fill("Browser wizard acceptance");
       await page.getByRole("button", { name: "Continue", exact: true }).click();
       await page.getByRole("button", { name: "Select all shown" }).click();
       await page.getByRole("button", { name: "Continue", exact: true }).click();
       await page.locator("#wizardMin").fill("60"); await page.locator("#wizardMax").fill("60");
-      await page.getByRole("button", { name: "Continue", exact: true }).click();
       await page.getByRole("button", { name: "Create campaign", exact: true }).click();
       await expect(page.getByRole("status")).toContainText("Campaign created.");
       const list = await data(await actorA.get("/api/campaigns"));

@@ -35,8 +35,8 @@ test("cancel confirmation makes no DELETE request", async ({ page }) => {
   let requests = 0;
   await page.route("**/api/campaigns/**", (route) => { requests++; return route.fulfill({ json: { data: { deleted: true }, error: null } }); });
   await mount(page);
-  page.once("dialog", async (dialog) => { expect(dialog.message()).toContain("queue/history permanently"); await dialog.dismiss(); });
   await page.getByRole("button", { name: "Delete campaign", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click();
   expect(requests).toBe(0);
   await expect(page.getByRole("button", { name: "Delete campaign", exact: true })).toBeEnabled();
 });
@@ -46,17 +46,17 @@ test("confirmed deletion uses DELETE and removes the item", async ({ page }) => 
     return route.fulfill({ json: { data: { deleted: true }, error: null } });
   });
   await mount(page);
-  page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Delete campaign", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Delete campaign", exact: true }).click();
   await expect(page.getByRole("status")).toHaveText("Deleted");
 });
 test("server conflict stays visible in Vietnamese and permits retry", async ({ page }) => {
   await page.route("**/api/campaigns/**", (route) => route.fulfill({ status: 409, json: { data: null, error: { message: "Resolve opened or unconfirmed posts before deleting this campaign." } } }));
   await mount(page, { locale: "vi" });
-  page.once("dialog", async (dialog) => { expect(dialog.message()).toContain("Xóa vĩnh viễn"); await dialog.accept(); });
   await page.getByRole("button", { name: "Xóa chiến dịch", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Xóa chiến dịch", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("chưa rõ kết quả");
-  await expect(page.getByRole("button", { name: "Xóa chiến dịch", exact: true })).toBeEnabled();
+  await expect(page.getByRole("dialog").getByRole("button", { name: "Xóa chiến dịch", exact: true })).toBeEnabled();
 });
 test("running campaign button is disabled", async ({ page }) => {
   await mount(page, { disabled: true });
@@ -65,8 +65,8 @@ test("running campaign button is disabled", async ({ page }) => {
 test("detail page returns to campaign list after deletion", async ({ page }) => {
   await page.route("**/api/campaigns/**", (route) => route.fulfill({ json: { data: { deleted: true }, error: null } }));
   await mount(page, { detail: true });
-  page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Delete campaign", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Delete campaign", exact: true }).click();
   await expect.poll(() => page.evaluate(() => (window as unknown as { lastNavigation?: string }).lastNavigation)).toBe("/campaigns");
 });
 

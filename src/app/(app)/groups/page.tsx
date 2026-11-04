@@ -1,4 +1,5 @@
 import { T, LocalizedInput } from "@/components/language-provider";
+import Link from "next/link";
 import { and, count, desc, eq, ilike, or } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { groups } from "@/lib/db/schema";
@@ -117,6 +118,7 @@ export default async function GroupsPage({
           <button className="button small primary">
             <T>{"Filter"}</T>
           </button>
+          {filterParams.size > 0 && <Link href="/groups" className="button small"><T>{"Clear filters"}</T></Link>}
         </form>
       </div>
 

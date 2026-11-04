@@ -27,7 +27,8 @@ export async function GET(request: Request) {
     const claimToken = crypto.randomUUID();
     const [claimed] = await tx.update(queueItems).set({ status: "OPENED", startedAt: job.item.startedAt ?? now, claimToken, claimedAt: now, attemptCount: job.item.attemptCount + 1, updatedAt: now }).where(and(eq(queueItems.id, job.item.id), eq(queueItems.workspaceId, device.workspaceId))).returning();
     if (!claimed) return null;
-    const files = await tx.select().from(media).where(and(eq(media.contentId, job.content.id), eq(media.workspaceId, device.workspaceId)));
+    // Reference documents stay in the library; the post composer only accepts image attachments.
+    const files = await tx.select().from(media).where(and(eq(media.contentId, job.content.id), eq(media.workspaceId, device.workspaceId), inArray(media.mimeType, ["image/jpeg", "image/png", "image/webp"])));
     return { id: claimed.id, campaignId: job.campaign.id, campaign: job.campaign.name, group: { id: job.group.id, name: job.group.name, url: job.group.facebookUrl }, content: { name: job.content.name, caption: job.variant?.body ?? job.content.body, linkUrl: job.content.linkUrl, media: files.map((file) => ({ id: file.id, mimeType: file.mimeType, filename: file.originalFilename })) }, claimToken };
   });
   if (!payload && campaignId) {

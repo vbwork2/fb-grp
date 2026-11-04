@@ -1,13 +1,25 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ComponentProps, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { LOCALE_COOKIE, translate, type Locale } from "@/lib/i18n";
 
 const LocaleContext = createContext<Locale>("en");
+const LanguageSlotContext = createContext<(element: HTMLDivElement | null) => void>(() => {});
 const subscribeToHydration = () => () => {};
+
+export function useLocale() {
+  return useContext(LocaleContext);
+}
+
+export function LanguagePickerSlot() {
+  const setTarget = useContext(LanguageSlotContext);
+  return <div className="language-slot" ref={setTarget} />;
+}
 
 export function LanguageProvider({ children, initialLocale }: { children: ReactNode; initialLocale: Locale }) {
   const [locale, setLocale] = useState(initialLocale);
+  const [target, setTarget] = useState<HTMLDivElement | null>(null);
   const hydrated = useSyncExternalStore(subscribeToHydration, () => true, () => false);
   useEffect(() => {
     document.documentElement.lang = locale;
@@ -17,7 +29,8 @@ export function LanguageProvider({ children, initialLocale }: { children: ReactN
     setLocale(next);
     document.cookie = `${LOCALE_COOKIE}=${next}; Path=/; Max-Age=31536000; SameSite=Lax${location.protocol === "https:" ? "; Secure" : ""}`;
   }
-  return <LocaleContext.Provider value={locale}><div className="language-picker"><label htmlFor="app-language">{locale === "vi" ? "Ngôn ngữ" : "Language"}</label><select id="app-language" disabled={!hydrated} value={locale} onChange={(event) => changeLocale(event.target.value === "vi" ? "vi" : "en")}><option value="en">English</option><option value="vi">Tiếng Việt</option></select></div>{children}</LocaleContext.Provider>;
+  const picker = <div className="language-picker"><label htmlFor="app-language">{locale === "vi" ? "Ngôn ngữ" : "Language"}</label><select id="app-language" disabled={!hydrated} value={locale} onChange={(event) => changeLocale(event.target.value === "vi" ? "vi" : "en")}><option value="en">English</option><option value="vi">Tiếng Việt</option></select></div>;
+  return <LocaleContext.Provider value={locale}><LanguageSlotContext.Provider value={setTarget}>{target ? createPortal(picker, target) : picker}{children}</LanguageSlotContext.Provider></LocaleContext.Provider>;
 }
 
 export function T({ children }: { children: ReactNode }) {

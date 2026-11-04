@@ -5,8 +5,9 @@ import { media } from "@/lib/db/schema";
 import { getIdentity } from "@/lib/auth/session";
 import { jsonError, jsonSuccess, verifySameOrigin } from "@/lib/security/http";
 import { deleteMedia, getMedia } from "@/lib/storage";
+import { mediaContentDisposition } from "@/lib/validators/media";
 
-export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const identity = await getIdentity();
   if (!identity) return jsonError("UNAUTHORIZED", "Sign in to continue.", 401);
   const { id } = await context.params;
@@ -14,10 +15,15 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   if (!item) return jsonError("RESOURCE_NOT_FOUND", "Media not found.", 404);
   let bytes: Uint8Array | null;
   try { bytes = await getMedia(item.storageKey); } catch {
-    return jsonError("STORAGE_UNAVAILABLE", "Unable to load image. Try again.", 503);
+    return jsonError("STORAGE_UNAVAILABLE", "Unable to load file. Try again.", 503);
   }
   if (!bytes) return jsonError("RESOURCE_NOT_FOUND", "Media file not found.", 404);
-  return new Response(new Blob([bytes.slice().buffer as ArrayBuffer], { type: item.mimeType }), { headers: { "content-type": item.mimeType, "content-length": String(bytes.byteLength), "cache-control": "private, no-store", "x-content-type-options": "nosniff" } });
+  const headers: Record<string, string> = { "content-type": item.mimeType, "content-length": String(bytes.byteLength), "cache-control": "private, no-store", "x-content-type-options": "nosniff" };
+  if (item.mimeType === "application/pdf") {
+    headers["content-disposition"] = mediaContentDisposition(item.originalFilename, new URL(request.url).searchParams.get("download") === "1");
+    headers["content-security-policy"] = "sandbox; default-src 'none'; frame-ancestors 'none'";
+  }
+  return new Response(new Blob([bytes.slice().buffer as ArrayBuffer], { type: item.mimeType }), { headers });
 }
 
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -41,6 +47,6 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
     });
     return deleted ? jsonSuccess(deleted) : jsonError("RESOURCE_NOT_FOUND", "Media not found.", 404);
   } catch {
-    return jsonError("DELETE_FAILED", "Unable to delete image. Try again.", 500);
+    return jsonError("DELETE_FAILED", "Unable to delete file. Try again.", 500);
   }
 }

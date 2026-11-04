@@ -53,7 +53,7 @@ export default async function SettingsPage() {
         <ProfileSettings displayName={identity.name} />
       </div>
 
-      <PairingPanel />
+      <div id="extension"><PairingPanel /></div>
 
       <div className="panel">
         <div className="panel-head">

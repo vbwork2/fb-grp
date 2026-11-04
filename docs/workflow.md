@@ -58,6 +58,10 @@ Worker restart or lost watcher after tab reload pauses for review. The extension
 
 ## Editing a campaign
 
+Campaign creation uses three steps: Campaign & Content, Select Groups, and Schedule & Review. A live summary keeps the current content, chosen groups and timing visible. Previously visited steps and the summary's Edit actions retain the draft. Group filters never remove existing selections; Selected only makes it easier to review a large selection. Final submission revalidates every step and keeps the draft after a failed request.
+
+Campaigns opens the list first when campaigns already exist. New campaign opens the form, and hiding it keeps its draft while the page stays open. Dashboard and sidebar shortcuts open `/campaigns#new` directly. After a successful save, the form closes and focus moves to the confirmation with an Open campaign link. Saving creates a READY campaign; Start remains a separate action. Dashboard setup guidance uses saved content, active groups and unexpired paired devices to identify the next missing prerequisite.
+
 Open Campaigns, choose the campaign, then click Edit campaign. READY campaigns can be edited directly; pause a RUNNING campaign first and resolve OPENED or AWAITING_CONFIRMATION jobs before saving.
 
 The editor supports changing the campaign name and intervals, selecting or creating content, editing caption/link, adding existing or new groups, updating group names/URLs, and removing groups from the campaign. Every saved campaign still needs one content item and at least one group. Removing the selected content clears the editor so it can be replaced with existing or new content; it does not delete library content. Group metadata is saved to the workspace immediately; campaign selection applies when Save campaign changes is clicked.
@@ -71,13 +75,15 @@ Pause a running campaign first. OPENED or AWAITING_CONFIRMATION jobs must be res
 
 ## Content library images and details
 
-Each saved content row shows its persisted image count, including after reloading the page. Details opens the caption, link, saved image previews, upload control, edit/duplicate/delete actions and variants. Only one row's details is open at a time.
+The same upload controls accept JPG, PNG, WebP and PDF files, including mixed selections. The UI displays the configured per-file size limit, counts images and PDFs separately and keeps unfinished files available for retry. PDFs have a document card with Open PDF, Download PDF and Delete PDF actions rather than an image preview. PDF reads and downloads require the owning workspace session; files stay in private storage. Signature, MIME type, extension and size are checked on upload. PDFs are reference documents and are excluded from the posting extension's image attachments; they are not converted into images or posted automatically.
+
+Each saved content row shows its persisted image count, including after reloading the page. Details opens a modal with the caption, link, saved image previews, upload control, edit/duplicate/delete actions and variants. The list stays in place behind the popup.
 
 Choose multiple JPG, PNG or WebP images to attach them to existing content. While uploading, conflicting edits and deletion are disabled. The count increases only after each successful response. A partial failure retains the remaining selection; Retry remaining images uploads only those files, while Clear selection discards the pending selection. When creating content, selected images are counted separately from saved images and are uploaded on Save content.
 
 Image deletion: open Details and click Delete image below a thumbnail. Confirm the filename before deletion. The API verifies Origin, session and workspace; it removes only that image and its storage file. Failed storage deletion retains metadata for retry, and the visible count changes only after success. Images copied to other content have independent storage keys and remain available. Content changes apply to library content used by campaigns; deleting a library image does not remove an already published Facebook image.
 
-Inline editing: click Edit within an item's Details. The edit form appears in that same card; saving updates its name, caption and link without leaving the page. A failed save retains the draft. Close discards unsaved edits. Uploading/deleting images and saving content disable conflicting actions while requests are active.
+Popup editing: click Edit within an item's Details. A separate modal opens; saving updates its name, caption and link and returns to Details. Group, campaign and variant editors also open in modals. A failed save retains the draft and displays the error inside the popup. Close or Escape discards unsaved edits and returns focus to the triggering control. Background scrolling is locked, long forms scroll inside the popup, and closing is blocked while saving. Deleting content, groups, campaigns, variants or media requires confirmation; cancellation sends no delete request. Failed deletions remain open for retry. Uploading/deleting files and saving content disable conflicting actions while requests are active.
 
 Management editors open next to their context: the Groups page shows its edit form in a full-width table row immediately below the selected group. Campaign settings contain their campaign editor, and editing a campaign group opens its form inside that group's row. The new-group form opens directly below Add a Facebook Group. Opening another group's editor resets the inputs to that group; saving refreshes the displayed row.
 

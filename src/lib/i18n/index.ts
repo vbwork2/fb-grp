@@ -9,6 +9,7 @@ export function translate(text: string, locale: Locale): string {
   const match = vietnamese[trimmed];
   if (match) return text.replace(trimmed, match);
   const patterns: [RegExp, (...values: string[]) => string][] = [
+    [/^Choose an image or PDF up to (\d+) MB\.$/, (size) => `Chọn ảnh hoặc PDF tối đa ${size} MB.`],
     [/^Delete (.+)\?$/, (name) => `Xóa ${name}?`],
     [/^Select (.+)$/, (name) => `Chọn ${name}`],
     [/^View (.+)$/, (name) => `Xem ${name}`],

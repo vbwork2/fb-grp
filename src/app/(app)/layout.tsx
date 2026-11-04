@@ -1,10 +1,9 @@
-import { T } from "@/components/language-provider";
+import { LanguagePickerSlot, T } from "@/components/language-provider";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getIdentity } from "@/lib/auth/session";
 import SignOutButton from "@/components/sign-out-button";
-import { AppNav } from "@/components/app-nav";
-import { LogoIcon } from "@/components/icons";
+import { AppNav, WorkspaceBreadcrumb } from "@/components/app-nav";
 
 export default async function AppLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const identity = await getIdentity();
@@ -14,11 +13,9 @@ export default async function AppLayout({ children }: Readonly<{ children: React
 
   return (
     <div className="app">
+      <a href="#workspace-content" className="skip-link"><T>{"Skip to content"}</T></a>
       <aside className="sidebar">
         <Link href="/dashboard" className="brand" aria-label="Groupflow Dashboard">
-          <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-blue-600 text-white shadow-xs">
-            <LogoIcon className="w-5 h-5" />
-          </span>
           <span>
             group<span className="text-blue-600 font-bold">flow</span>
           </span>
@@ -27,6 +24,11 @@ export default async function AppLayout({ children }: Readonly<{ children: React
           <T>{"Workspace"}</T>
         </div>
         <AppNav />
+        <div className="sidebar-help">
+          <strong><T>{"Ready to post?"}</T></strong>
+          <p><T>{"Content, groups, schedule. Everything in one campaign."}</T></p>
+          <Link href="/campaigns#new" className="button primary"><T>{"New campaign"}</T></Link>
+        </div>
         <div className="sidebar-foot">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center font-bold text-slate-700 text-xs flex-shrink-0">
@@ -45,15 +47,16 @@ export default async function AppLayout({ children }: Readonly<{ children: React
       </aside>
       <div className="main">
         <header className="topbar">
-          <div className="flex items-center gap-3">
-            <div className="w-2 h-2 rounded-full bg-emerald-500" title="Connected" />
+          <WorkspaceBreadcrumb />
+          <div className="topbar-account">
             <span className="text-xs font-medium text-slate-600 hidden sm:inline-block">
               {identity.email}
             </span>
+            <LanguagePickerSlot />
+            <SignOutButton />
           </div>
-          <SignOutButton />
         </header>
-        {children}
+        <div id="workspace-content" className="workspace-content" tabIndex={-1}>{children}</div>
       </div>
     </div>
   );

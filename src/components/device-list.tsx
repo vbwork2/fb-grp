@@ -3,9 +3,9 @@
 import { ActionButton } from "@/components/loading";
 
 import { T } from "@/components/language-provider";
-import { translateDialog } from "@/lib/i18n";
+import { ConfirmDialog } from "@/components/modal";
 import { useState } from "react";
-import { DeviceIcon, TrashIcon, AlertCircleIcon } from "@/components/icons";
+import { DeviceIcon, TrashIcon } from "@/components/icons";
 
 type Device = {
   id: string;
@@ -17,10 +17,9 @@ type Device = {
 
 export default function DeviceList({ initialDevices }: { initialDevices: Device[] }) {
   const [items, setItems] = useState(initialDevices);
-  const [error, setError] = useState("");
+  const [revoking, setRevoking] = useState<Device | null>(null);
 
   async function revoke(id: string) {
-    if (!window.confirm(translateDialog("Revoke this device? It will immediately lose API access."))) return;
     const response = await fetch("/api/devices", {
       method: "DELETE",
       headers: { "content-type": "application/json" },
@@ -28,8 +27,7 @@ export default function DeviceList({ initialDevices }: { initialDevices: Device[
     });
     const result = (await response.json()) as { error?: { message: string } };
     if (!response.ok) {
-      setError(result.error?.message ?? "Unable to revoke device.");
-      return;
+      throw new Error(result.error?.message ?? "Unable to revoke device.");
     }
     setItems((current) => current.filter((device) => device.id !== id));
   }
@@ -100,7 +98,7 @@ export default function DeviceList({ initialDevices }: { initialDevices: Device[
                     <ActionButton
                       type="button"
                       className="button small danger"
-                      onClick={() => revoke(device.id)}
+                      onClick={() => setRevoking(device)}
                       title="Revoke device access"
                     >
                       <TrashIcon className="w-3 h-3" />
@@ -113,14 +111,9 @@ export default function DeviceList({ initialDevices }: { initialDevices: Device[
           </tbody>
         </table>
       </div>
-      {error && (
-        <div className="p-4 bg-rose-50 border-t border-rose-200">
-          <p className="error m-0" role="alert">
-            <AlertCircleIcon className="w-4 h-4 flex-shrink-0" />
-            <span><T>{error}</T></span>
-          </p>
-        </div>
-      )}
+      {revoking && <ConfirmDialog title={<T>{"Revoke device access"}</T>} confirmLabel="Revoke" onClose={() => setRevoking(null)} onConfirm={() => revoke(revoking.id)}>
+        <strong>{revoking.name}</strong><p><T>{"Revoke this device? It will immediately lose API access."}</T></p>
+      </ConfirmDialog>}
     </>
   );
 }

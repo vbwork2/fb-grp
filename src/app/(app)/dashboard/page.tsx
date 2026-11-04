@@ -1,8 +1,9 @@
 import { T } from "@/components/language-provider";
-import { and, count, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, gte, inArray, isNull, sql } from "drizzle-orm";
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { campaigns, groups, postHistory, queueItems } from "@/lib/db/schema";
+import { campaigns, contents, devices, groups, postHistory, queueItems } from "@/lib/db/schema";
+import { WorkflowOverview } from "@/components/workflow-overview";
 import { getIdentity } from "@/lib/auth/session";
 import {
   GroupsIcon,
@@ -31,6 +32,9 @@ export default async function DashboardPage() {
     recent,
     active,
     progressRows,
+    contentCount,
+    activeGroupCount,
+    deviceCount,
   ] = await Promise.all([
     db.select({ value: count() }).from(groups).where(eq(groups.workspaceId, identity.workspaceId)),
     db
@@ -81,6 +85,9 @@ export default async function DashboardPage() {
       .from(queueItems)
       .where(eq(queueItems.workspaceId, identity.workspaceId))
       .groupBy(queueItems.campaignId),
+    db.select({ value: count() }).from(contents).where(eq(contents.workspaceId, identity.workspaceId)),
+    db.select({ value: count() }).from(groups).where(and(eq(groups.workspaceId, identity.workspaceId), eq(groups.status, "ACTIVE"))),
+    db.select({ value: count() }).from(devices).where(and(eq(devices.workspaceId, identity.workspaceId), isNull(devices.revokedAt), gt(devices.expiresAt, new Date()))),
   ]);
 
   const progress = new Map(progressRows.map((row) => [row.campaignId, { total: row.total, posted: row.posted }]));
@@ -138,12 +145,13 @@ export default async function DashboardPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <Link href="/campaigns" className="button primary">
-            <PlusIcon className="w-4 h-4" />
+          <Link href="/campaigns#new" className="button primary">
             <span><T>{"New campaign"}</T></span>
           </Link>
         </div>
       </div>
+
+      <WorkflowOverview hasContent={Boolean(contentCount[0]?.value)} hasGroups={Boolean(activeGroupCount[0]?.value)} hasDevice={Boolean(deviceCount[0]?.value)} />
 
       <section className="cards" aria-label="Summary Metrics">
         {metricCards.map(({ label, value, icon: Icon, color, href }) => (

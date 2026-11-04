@@ -44,15 +44,15 @@ Local development stores images in `.local-storage/media`. Database-specific ste
 - Email/password registration and login, with an automatically created personal workspace
 - Password reset email flow (development console or production Resend) and profile/password change
 - Group creation, editing, search/filter, server-side pagination, pause, bulk disable, delete, and CSV import
-- Reusable captions with edit/duplicate actions, optional links, variants, and image upload
-- Four-step campaign creation, multi-group selection, and scheduled queue generation
+- Reusable captions with edit/duplicate actions, optional links, variants, image uploads, and PDF reference documents with open/download controls
+- Three-step campaign creation with a live summary, multi-group selection, and scheduled queue generation
 - Dashboard, queue, history, and CSV history export
 - One-time device pairing, device revocation, extension-driven queue claims, and image previews
 - Workspace-scoped API queries and hashed extension tokens
 
 ## Interface language
 
-Use the Language selector at the bottom right of any web page to choose English or Tiếng Việt. The selection persists in a cookie and applies to navigation, forms, status labels and feedback. User captions, group names and other saved content are preserved.
+Use the Language selector in the workspace header, or at the bottom right of public pages, to choose English or Tiếng Việt. The selection persists in a cookie and applies to navigation, forms, status labels and feedback. User captions, group names and other saved content are preserved.
 
 The Chrome Extension has its own language selector at the top of the popup. Its choice persists in `chrome.storage.local`. Reload the unpacked extension after rebuilding to use the new popup.
 

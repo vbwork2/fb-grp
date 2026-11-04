@@ -2,34 +2,26 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { T } from "@/components/language-provider";
-import {
-  DashboardIcon,
-  GroupsIcon,
-  ContentIcon,
-  CampaignIcon,
-  QueueIcon,
-  HistoryIcon,
-  SettingsIcon,
-} from "@/components/icons";
-
+import { T, useLocale } from "@/components/language-provider";
+import { translate } from "@/lib/i18n";
 const navItems = [
-  { label: "Dashboard", href: "/dashboard", icon: DashboardIcon },
-  { label: "Groups", href: "/groups", icon: GroupsIcon },
-  { label: "Content", href: "/content", icon: ContentIcon },
-  { label: "Campaigns", href: "/campaigns", icon: CampaignIcon },
-  { label: "Queue", href: "/queue", icon: QueueIcon },
-  { label: "History", href: "/history", icon: HistoryIcon },
-  { label: "Settings", href: "/settings", icon: SettingsIcon },
+  { label: "Dashboard", href: "/dashboard" },
+  { label: "Groups", href: "/groups" },
+  { label: "Content", href: "/content" },
+  { label: "Campaigns", href: "/campaigns" },
+  { label: "Queue", href: "/queue" },
+  { label: "History", href: "/history" },
+  { label: "Settings", href: "/settings" },
 ];
 
 export function AppNav() {
   const pathname = usePathname();
+  const locale = useLocale();
 
   return (
-    <nav className="nav" aria-label="Main Navigation">
-      {navItems.map(({ label, href, icon: Icon }) => {
-        const isActive = pathname === href || (href !== "/dashboard" && pathname.startsWith(href));
+    <nav className="nav" aria-label={translate("Main Navigation", locale)}>
+      {navItems.map(({ label, href }) => {
+        const isActive = pathname === href || pathname.startsWith(`${href}/`);
         return (
           <Link
             key={href}
@@ -37,11 +29,27 @@ export function AppNav() {
             className={isActive ? "active" : undefined}
             aria-current={isActive ? "page" : undefined}
           >
-            <Icon className="w-4 h-4 flex-shrink-0" />
             <span><T>{label}</T></span>
           </Link>
         );
       })}
+    </nav>
+  );
+}
+
+export function WorkspaceBreadcrumb() {
+  const pathname = usePathname();
+  const locale = useLocale();
+  const current = navItems.find(({ href }) => pathname === href || pathname.startsWith(`${href}/`));
+  return (
+    <nav className="workspace-breadcrumb" aria-label={translate("Breadcrumb", locale)}>
+      <Link href="/dashboard"><T>{"Workspace"}</T></Link>
+      <span aria-hidden="true">/</span>
+      {current && pathname !== current.href ? <>
+        <Link href={current.href}><T>{current.label}</T></Link>
+        <span aria-hidden="true">/</span>
+        <span aria-current="page"><T>{"Details"}</T></span>
+      </> : <span aria-current="page"><T>{current?.label ?? "Dashboard"}</T></span>}
     </nav>
   );
 }

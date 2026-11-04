@@ -5,6 +5,7 @@ import { contents } from "@/lib/db/schema";
 import { getIdentity } from "@/lib/auth/session";
 import { ContentPanel } from "@/components/workspace-panel";
 import { getContentLibraryMedia } from "@/lib/services/content-library";
+import { config } from "@/lib/config";
 
 export default async function ContentPage() {
   const identity = await getIdentity();
@@ -20,7 +21,7 @@ export default async function ContentPage() {
         <h1><T>{"Content"}</T></h1>
         <p><T>{"Save captions for review before you post."}</T></p>
       </div></div>
-      <ContentPanel initialContents={items} initialMedia={initialMedia} />
+      <ContentPanel initialContents={items} initialMedia={initialMedia} maxUploadMegabytes={config.maxUploadSizeBytes / 1024 / 1024} />
     </main>
   );
 }

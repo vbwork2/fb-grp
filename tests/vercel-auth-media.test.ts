@@ -87,11 +87,12 @@ it("pairs once, stores only a token hash and rejects expired and revoked devices
   expect((await revoke.DELETE(request("/api/devices", { id: paired.deviceId }, "DELETE"))).status).toBe(200); expect(await getDevice(authorization)).toBeNull();
 });
 
-it.each(["vercel", "b2"])("uploads private media with %s and checks session and device workspace before fetching bytes", async (provider) => {
+it.each(["vercel", "b2"].flatMap((provider) => ["image/png", "application/pdf"].map((mimeType) => [provider, mimeType])))("uploads private media with %s (%s) and checks session and device workspace before fetching bytes", async (provider, mimeType) => {
   vi.stubEnv("MEDIA_STORAGE_PROVIDER", provider);
   const owner = await register(); const ownerCookie = state.cookie;
-  const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-  const form = new FormData(); form.set("file", new File([bytes], "fixture.png", { type: "image/png" }));
+  const bytes = mimeType === "application/pdf" ? new TextEncoder().encode("%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n") : new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const filename = mimeType === "application/pdf" ? "Bảng giá.pdf" : "fixture.png";
+  const form = new FormData(); form.set("file", new File([bytes], filename, { type: mimeType }));
   const upload = await import("../src/app/api/media/route");
   const result = await upload.POST(new Request("https://app.example/api/media", { method: "POST", headers: { origin: "https://app.example", host: "app.example" }, body: form }));
   expect(result.status).toBe(201); const image = (await result.json()).data;
@@ -99,7 +100,14 @@ it.each(["vercel", "b2"])("uploads private media with %s and checks session and 
   const context = { params: Promise.resolve({ id: image.id }) };
   const route = await import("../src/app/api/media/[id]/route");
   const response = await route.GET(request("/api/media/" + image.id, undefined, "GET"), context);
-  expect(response.status).toBe(200); expect(response.headers.get("content-type")).toBe("image/png"); expect(response.headers.get("cache-control")).toBe("private, no-store");
+  expect(response.status).toBe(200); expect(response.headers.get("content-type")).toBe(mimeType); expect(response.headers.get("cache-control")).toBe("private, no-store");
+  if (mimeType === "application/pdf") {
+    expect(response.headers.get("content-disposition")).toContain("inline;");
+    expect(response.headers.get("content-security-policy")).toContain("sandbox");
+    const download = await route.GET(request(`/api/media/${image.id}?download=1`, undefined, "GET"), context);
+    expect(download.headers.get("content-disposition")).toContain("attachment;");
+    expect(download.headers.get("content-disposition")).toContain(encodeURIComponent(filename));
+  }
   expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
   state.cookie = ""; expect((await route.GET(request("/api/media/" + image.id, undefined, "GET"), context)).status).toBe(401);
   await register("foreign@example.test");
@@ -116,4 +124,16 @@ it.each(["vercel", "b2"])("uploads private media with %s and checks session and 
   await db.update(media).set({ workspaceId: (await register("third@example.test")).workspaceId }).where(eq(media.id, image.id));
   vi.mocked(getMedia).mockClear(); expect((await extensionRoute.GET(deviceRequest, context)).status).toBe(404); expect(getMedia).not.toHaveBeenCalled();
   expect(owner.workspaceId).not.toBe((await db.select().from(media))[0].workspaceId);
+});
+
+it("rejects forged PDFs before storing a file or its metadata", async () => {
+  await register();
+  const { POST } = await import("../src/app/api/media/route");
+  const { putMedia } = await import("../src/lib/storage");
+  const form = new FormData();
+  form.set("file", new File(["not a PDF"], "fake.pdf", { type: "application/pdf" }));
+  const response = await POST(new Request("https://app.example/api/media", { method: "POST", headers: { origin: "https://app.example", host: "app.example" }, body: form }));
+  expect(response.status).toBe(400);
+  expect(putMedia).not.toHaveBeenCalled();
+  expect(await db.select().from(media)).toHaveLength(0);
 });

@@ -1,4 +1,5 @@
 import { T } from "@/components/language-provider";
+import Link from "next/link";
 import { and, count, desc, eq, gte, lte } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { campaigns, groups, postHistory } from "@/lib/db/schema";
@@ -159,6 +160,7 @@ export default async function HistoryPage({
           <button className="button small primary">
             <T>{"Filter"}</T>
           </button>
+          {(params.campaignId || params.groupId || params.status || params.from || params.to) && <Link href="/history" className="button small"><T>{"Clear filters"}</T></Link>}
         </form>
 
         {rows.length === 0 ? (

@@ -9,7 +9,7 @@ import { databaseConnectionString } from "../src/lib/db/connection";
 beforeEach(() => { vi.stubEnv("NODE_ENV", "production"); vi.clearAllMocks(); });
 afterEach(() => vi.unstubAllEnvs());
 describe("private Blob storage", () => {
-  it.each(["image/jpeg", "image/png", "image/webp"])("uploads %s privately without changing the database key", async mimeType => {
+  it.each(["image/jpeg", "image/png", "image/webp", "application/pdf"])("uploads %s privately without changing the database key", async mimeType => {
     await putMedia("image-key", new Uint8Array([1, 2]), { mimeType });
     expect(put).toHaveBeenCalledWith("image-key", expect.any(ArrayBuffer), { access: "private", addRandomSuffix: false, allowOverwrite: false, contentType: mimeType });
   });

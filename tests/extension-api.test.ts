@@ -4,7 +4,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from "vitest";
-import { auditLogs, campaigns, contents, groups, postHistory, queueItems, users, workspaces } from "../src/lib/db/schema";
+import { auditLogs, campaigns, contents, groups, media, postHistory, queueItems, users, workspaces } from "../src/lib/db/schema";
 
 const state = vi.hoisted(() => ({ db: undefined as unknown, device: { userId: "", workspaceId: "" } }));
 vi.mock("@/lib/db", () => ({ db: state.db }));
@@ -99,6 +99,24 @@ it("two claims get one job and stale uncertain jobs are never reclaimed", async 
   const results = await Promise.all([GET(new Request("https://example.test/api/extension/jobs/next")), GET(new Request("https://example.test/api/extension/jobs/next"))]);
   const bodies = await Promise.all(results.map((response) => response.json()));
   expect(bodies.filter((body) => body.data.job)).toHaveLength(1);
+});
+
+it("keeps PDF references out of the extension's image attachments", async () => {
+  const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, campaignId));
+  const files = await db.insert(media).values([
+    { workspaceId: state.device.workspaceId, contentId: campaign.contentId, storageKey: "post-image", mimeType: "image/png", originalFilename: "image.png", sizeBytes: 8 },
+    { workspaceId: state.device.workspaceId, contentId: campaign.contentId, storageKey: "reference-pdf", mimeType: "application/pdf", originalFilename: "reference.pdf", sizeBytes: 64 },
+  ]).returning();
+  try {
+    await db.update(queueItems).set({ status: "READY", claimToken: null, claimedAt: null }).where(eq(queueItems.id, jobId));
+    const { GET } = await import("../src/app/api/extension/jobs/next/route");
+    const response = await GET(new Request("https://example.test/api/extension/jobs/next"));
+    const job = (await response.json()).data.job;
+    expect(job.content.media).toEqual([{ id: files[0].id, mimeType: "image/png", filename: "image.png" }]);
+    expect(await db.select().from(media).where(eq(media.id, files[1].id))).toHaveLength(1);
+  } finally {
+    await db.delete(media).where(eq(media.contentId, campaign.contentId));
+  }
 });
 
 it("automatic click evidence stays audited and prevents release", async () => {

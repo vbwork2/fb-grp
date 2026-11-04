@@ -3,25 +3,23 @@
 import { ActionButton, ActionForm, LoadingDots, LoadingStatus } from "@/components/loading";
 
 import { T, LocalizedInput, LocalizedTextarea } from "@/components/language-provider";
-import { translateDialog } from "@/lib/i18n";
-import { Fragment, useEffect, useState } from "react";
+import { Modal, ConfirmDialog } from "@/components/modal";
+import { Fragment, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { isSupportedMediaFile, MEDIA_UPLOAD_ACCEPT } from "@/lib/validators/media";
 import DeleteCampaignButton from "@/components/delete-campaign-button";
 import { CampaignWizard } from "@/components/campaign-wizard";
 import {
   GroupsIcon,
   ContentIcon,
-  CampaignIcon,
   UploadIcon,
   PlusIcon,
   EditIcon,
   CopyIcon,
   TrashIcon,
   ExternalLinkIcon,
-  PlayIcon,
   AlertCircleIcon,
-  CheckIcon,
   DeviceIcon,
-  CloseIcon,
 } from "@/components/icons";
 
 type Group = {
@@ -70,13 +68,11 @@ function Feedback({ error, success }: { error: string; success: string }) {
     <>
       {error && (
         <p className="error" role="alert">
-          <AlertCircleIcon className="w-4 h-4 flex-shrink-0" />
           <span><T>{error}</T></span>
         </p>
       )}
       {success && (
         <div className="notice" role="status">
-          <CheckIcon className="w-4 h-4 flex-shrink-0" />
           <span><T>{success}</T></span>
         </div>
       )}
@@ -91,6 +87,7 @@ export function GroupsPanel({ initialGroups }: { initialGroups: Group[] }) {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [editingGroup, setEditingGroup] = useState<Group | null>(null);
+  const [deletingGroup, setDeletingGroup] = useState<Group | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [importing, setImporting] = useState(false);
 
@@ -123,13 +120,10 @@ export function GroupsPanel({ initialGroups }: { initialGroups: Group[] }) {
   }
 
   async function remove(group: Group) {
-    if (!window.confirm(translateDialog(`Delete ${group.name}?`))) return;
-    try {
-      await request(`/api/groups/${group.id}`, undefined, "DELETE");
-      setItems((current) => current.filter((entry) => entry.id !== group.id));
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to delete the group.");
-    }
+    await request(`/api/groups/${group.id}`, undefined, "DELETE");
+    setItems((current) => current.filter((entry) => entry.id !== group.id));
+    setSelected((current) => current.filter((id) => id !== group.id));
+    setSuccess("Group deleted.");
   }
 
   async function importCsv(event: React.ChangeEvent<HTMLInputElement>) {
@@ -252,7 +246,7 @@ export function GroupsPanel({ initialGroups }: { initialGroups: Group[] }) {
         </ActionForm>
 
         <div className="p-5 pt-0 border-t border-slate-100 flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 csv-import">
             <label className="button small" aria-busy={importing} htmlFor="groupCsv" title="Import Facebook Groups from CSV">
               <UploadIcon className="w-3.5 h-3.5 text-slate-500" />
               {importing && <LoadingDots />}<span><T>{importing ? "Please wait…" : "Import CSV"}</T></span>
@@ -263,7 +257,7 @@ export function GroupsPanel({ initialGroups }: { initialGroups: Group[] }) {
               type="file"
               accept=".csv,text/csv"
               onChange={(event) => void importCsv(event)}
-              style={{ display: "none" }}
+              className="sr-only"
             />
           </div>
           <p className="muted text-xs m-0">
@@ -284,11 +278,11 @@ export function GroupsPanel({ initialGroups }: { initialGroups: Group[] }) {
           <div className="flex items-center gap-2 flex-wrap">
             <div className="relative">
               <LocalizedInput
-                aria-label="Search groups"
-                placeholder="Search groups"
+                aria-label="Search this page"
+                placeholder="Search this page"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                className="pl-8"
+                className="table-search"
               />
             </div>
             {selected.length > 0 && (
@@ -310,11 +304,12 @@ export function GroupsPanel({ initialGroups }: { initialGroups: Group[] }) {
               <GroupsIcon className="w-6 h-6 text-slate-400" />
             </div>
             <strong>
-              <T>{"No Facebook Groups yet."}</T>
+              <T>{search ? "No groups match your search." : "No Facebook Groups yet."}</T>
             </strong>
             <p className="max-w-md text-sm text-slate-500 m-0">
-              <T>{"Add your first group or import a CSV to prepare a campaign."}</T>
+              <T>{search ? "Try another name or clear the search to see this page's groups." : "Add your first group or import a CSV to prepare a campaign."}</T>
             </p>
+            {search && <button type="button" className="button small" onClick={() => setSearch("")}><T>{"Clear search"}</T></button>}
           </div>
         ) : (
           <div className="table-wrap">
@@ -419,8 +414,7 @@ export function GroupsPanel({ initialGroups }: { initialGroups: Group[] }) {
                         <ActionButton
                           type="button"
                           className="button small"
-                          aria-expanded={editingGroup?.id === group.id}
-                          aria-controls={`group-editor-${group.id}`}
+                          aria-haspopup="dialog"
                           onClick={() => setEditingGroup(editingGroup?.id === group.id ? null : group)}
                           title="Edit group"
                         >
@@ -438,7 +432,7 @@ export function GroupsPanel({ initialGroups }: { initialGroups: Group[] }) {
                         <ActionButton
                           type="button"
                           className="button small danger"
-                          onClick={() => remove(group)}
+                          onClick={() => setDeletingGroup(group)}
                           title="Delete group"
                         >
                           <TrashIcon className="w-3 h-3" />
@@ -447,18 +441,6 @@ export function GroupsPanel({ initialGroups }: { initialGroups: Group[] }) {
                       </div>
                     </td>
                   </tr>
-                  {editingGroup?.id === group.id && (
-                    <tr id={`group-editor-${group.id}`}>
-                      <td colSpan={7}>
-                        <GroupEditor key={group.id} group={editingGroup}
-                          onClose={() => setEditingGroup(null)}
-                          onSaved={(updated) => {
-                            setItems((current) => current.map((item) => item.id === updated.id ? updated : item));
-                            setEditingGroup(null);
-                          }} />
-                      </td>
-                    </tr>
-                  )}
                   </Fragment>
                 ))}
               </tbody>
@@ -466,6 +448,16 @@ export function GroupsPanel({ initialGroups }: { initialGroups: Group[] }) {
           </div>
         )}
       </div>
+      {editingGroup && <GroupEditor key={editingGroup.id} group={editingGroup}
+        onClose={() => setEditingGroup(null)}
+        onSaved={(updated) => {
+          setItems((current) => current.map((item) => item.id === updated.id ? updated : item));
+          setEditingGroup(null);
+          setSuccess("Group updated.");
+        }} />}
+      {deletingGroup && <ConfirmDialog title={<T>{"Delete group"}</T>} onClose={() => setDeletingGroup(null)} onConfirm={() => remove(deletingGroup)}>
+        <strong>{deletingGroup.name}</strong><p><T>{"Delete this group from your workspace?"}</T></p>
+      </ConfirmDialog>}
     </>
   );
 }
@@ -498,19 +490,7 @@ function GroupEditor({
   }
 
   return (
-    <div className="panel border-blue-200 shadow-md">
-      <div className="panel-head bg-blue-50/50">
-        <div className="flex items-center gap-2">
-          <EditIcon className="w-4 h-4 text-blue-600" />
-          <h2>
-            <T>{"Edit group"}</T>
-          </h2>
-        </div>
-        <ActionButton type="button" className="button small" onClick={onClose}>
-          <CloseIcon className="w-3.5 h-3.5" />
-          <span><T>{"Close"}</T></span>
-        </ActionButton>
-      </div>
+    <Modal title={<T>{"Edit group"}</T>} onClose={onClose} busy={busy}>
       <ActionForm className="form p-5" onSubmit={submit}>
         <div className="field">
           <label htmlFor="editGroupName">
@@ -557,11 +537,11 @@ function GroupEditor({
           <T>{busy ? "Saving…" : "Save changes"}</T>
         </ActionButton>
       </ActionForm>
-    </div>
+    </Modal>
   );
 }
 
-export function ContentPanel({ initialContents, initialMedia = {} }: { initialContents: Content[]; initialMedia?: Record<string, MediaItem[]> }) {
+export function ContentPanel({ initialContents, initialMedia = {}, maxUploadMegabytes = 4 }: { initialContents: Content[]; initialMedia?: Record<string, MediaItem[]>; maxUploadMegabytes?: number }) {
   const [items, setItems] = useState(initialContents);
   const [uploads, setUploads] = useState<Record<string, MediaItem[]>>(initialMedia);
   const [uploadFeedbackId, setUploadFeedbackId] = useState<string | null>(null);
@@ -573,22 +553,24 @@ export function ContentPanel({ initialContents, initialMedia = {} }: { initialCo
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [editingContent, setEditingContent] = useState<Content | null>(null);
+  const [deletingContent, setDeletingContent] = useState<Content | null>(null);
+  const [deletingMedia, setDeletingMedia] = useState<{ contentId: string; image: MediaItem } | null>(null);
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [pendingContentId, setPendingContentId] = useState<string | null>(null);
   const [expandedVariants, setExpandedVariants] = useState<string[]>([]);
-  const maxMegabytes = process.env.NODE_ENV === "production" ? 4 : 10;
+  const maxMegabytes = maxUploadMegabytes;
 
   function validateFiles(selected: File[]) {
     if (
       selected.some(
-        (file) => !["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size === 0
+        (file) => !isSupportedMediaFile(file.type, file.name) || file.size === 0
       )
     ) {
-      throw new Error("Upload a valid JPG, PNG, or WebP image.");
+      throw new Error("Upload a valid JPG, PNG, WebP, or PDF file.");
     }
     if (selected.some((file) => file.size > maxMegabytes * 1024 * 1024)) {
-      throw new Error(`Choose an image up to ${maxMegabytes} MB.`);
+      throw new Error(`Choose an image or PDF up to ${maxMegabytes} MB.`);
     }
   }
 
@@ -598,7 +580,7 @@ export function ContentPanel({ initialContents, initialMedia = {} }: { initialCo
     form.set("contentId", contentId);
     const response = await fetch("/api/media", { method: "POST", body: form });
     const result = (await response.json()) as ApiResult<MediaItem>;
-    if (!response.ok || !result.data) throw new Error(result.error?.message ?? "Unable to upload image.");
+    if (!response.ok || !result.data) throw new Error(result.error?.message ?? "Unable to upload file.");
     const image = result.data;
     setUploads((current) => ({ ...current, [contentId]: [...(current[contentId] ?? []), image] }));
   }
@@ -629,13 +611,13 @@ export function ContentPanel({ initialContents, initialMedia = {} }: { initialCo
       formElement.reset();
       setFiles([]);
       setPendingContentId(null);
-      setSuccess(files.length ? "Content and images saved." : "Content saved.");
+      setSuccess(files.length ? (files.some((file) => file.type === "application/pdf") ? "Content and files saved." : "Content and images saved.") : "Content saved.");
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Unable to save content.";
       setError(message);
       if (contentId)
         setSuccess(
-          "Content saved. Some images could not be uploaded. Save again to retry the remaining images."
+          "Content saved. Some files could not be uploaded. Save again to retry the remaining files."
         );
     } finally {
       setBusy(false);
@@ -643,17 +625,16 @@ export function ContentPanel({ initialContents, initialMedia = {} }: { initialCo
   }
 
   async function remove(id: string) {
+    await request(`/api/content/${id}`, undefined, "DELETE");
+    setItems((current) => current.filter((item) => item.id !== id));
+    setDetailId(null);
     setUploadFeedbackId(null);
-    try {
-      await request(`/api/content/${id}`, undefined, "DELETE");
-      setItems((current) => current.filter((item) => item.id !== id));
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to delete content.");
-    }
+    setError("");
+    setSuccess("Content deleted.");
   }
 
   async function duplicate(item: Content) {
-    setUploadFeedbackId(null);
+    setUploadFeedbackId(item.id);
     try {
       const copy = await request<Content>("/api/content", {
         name: `${item.name} copy`,
@@ -681,9 +662,9 @@ export function ContentPanel({ initialContents, initialMedia = {} }: { initialCo
         await attachImage(contentId, file);
         setPendingImages((current) => ({ ...current, [contentId]: (current[contentId] ?? []).filter((entry) => entry !== file) }));
       }
-      setSuccess("Images uploaded and attached to this content.");
+      setSuccess(selected.some((file) => file.type === "application/pdf") ? "Files uploaded and attached to this content." : "Images uploaded and attached to this content.");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to upload image.");
+      setError(cause instanceof Error ? cause.message : "Unable to upload file.");
     } finally {
       setUploadingId(null);
     }
@@ -691,7 +672,6 @@ export function ContentPanel({ initialContents, initialMedia = {} }: { initialCo
 
   async function removeImage(contentId: string, image: MediaItem) {
     if (busy || contentSaving || uploadingId || deletingImageId) return;
-    if (!window.confirm(`${translateDialog("Delete this image from the content?")}\n${image.originalFilename}`)) return;
     setDeletingImageId(image.id);
     setUploadFeedbackId(contentId);
     setError("");
@@ -699,9 +679,9 @@ export function ContentPanel({ initialContents, initialMedia = {} }: { initialCo
     try {
       await request(`/api/media/${image.id}`, undefined, "DELETE");
       setUploads((current) => ({ ...current, [contentId]: (current[contentId] ?? []).filter((entry) => entry.id !== image.id) }));
-      setSuccess("Image deleted.");
+      setSuccess(image.mimeType === "application/pdf" ? "PDF deleted." : "Image deleted.");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to delete image. Try again.");
+      throw new Error(cause instanceof Error ? cause.message : "Unable to delete file. Try again.", { cause });
     } finally {
       setDeletingImageId(null);
     }
@@ -765,12 +745,12 @@ export function ContentPanel({ initialContents, initialMedia = {} }: { initialCo
 
             <div className="field">
               <label htmlFor="contentImages">
-                <T>{"Images (optional)"}</T>
+                <T>{"Images or PDFs (optional)"}</T>
               </label>
               <input
                 id="contentImages"
                 type="file"
-                accept="image/jpeg,image/png,image/webp"
+                accept={MEDIA_UPLOAD_ACCEPT}
                 multiple
                 onChange={(event) => {
                   const selected = [...(event.currentTarget.files ?? [])];
@@ -779,7 +759,7 @@ export function ContentPanel({ initialContents, initialMedia = {} }: { initialCo
                     setFiles(selected);
                     setError("");
                   } catch (cause) {
-                    setError(cause instanceof Error ? cause.message : "Unable to upload image.");
+                    setError(cause instanceof Error ? cause.message : "Unable to upload file.");
                     setFiles([]);
                     event.currentTarget.value = "";
                   }
@@ -787,10 +767,12 @@ export function ContentPanel({ initialContents, initialMedia = {} }: { initialCo
               />
               <p className="muted text-xs">
                 <T>
-                  {"Choose JPG, PNG, or WebP images. They will be uploaded when you save content."}
+                  {"Choose JPG, PNG, WebP, or PDF files. They will be uploaded when you save content."}
                 </T>
               </p>
-              {files.length > 0 && <p className="muted text-sm" role="status">{files.length}<T>{" images selected"}</T></p>}
+              <p className="muted text-xs"><T>{"PDFs are saved for reference and download. Only images are attached by the posting extension."}</T></p>
+              <small><T>{"Maximum size per file:"}</T> {maxMegabytes} MB</small>
+              {files.length > 0 && <p className="muted text-sm" role="status">{files.length}<T>{files.some((file) => file.type === "application/pdf") ? " files selected" : " images selected"}</T></p>}
               {files.length > 0 && (
                 <div className="flex flex-wrap gap-2 pt-1">
                   {files.map((file, index) => (
@@ -798,7 +780,6 @@ export function ContentPanel({ initialContents, initialMedia = {} }: { initialCo
                       key={index}
                       className="inline-flex items-center gap-1.5 text-xs bg-slate-100 text-slate-700 px-2.5 py-1 rounded-md border border-slate-200"
                     >
-                      <UploadIcon className="w-3 h-3 text-slate-400" />
                       <span className="font-medium truncate max-w-xs">{file.name}</span>
                       <span className="text-slate-400">({Math.ceil(file.size / 1024)} KB)</span>
                     </span>
@@ -855,20 +836,20 @@ export function ContentPanel({ initialContents, initialMedia = {} }: { initialCo
               const detailsOpen = detailId === item.id;
               const remainingImages = pendingImages[item.id] ?? [];
               const mediaForContent = uploads[item.id] ?? [];
+              const pdfCount = mediaForContent.filter((file) => file.mimeType === "application/pdf").length;
               return (
                 <article key={item.id} className="p-6 hover:bg-slate-50/40 transition-colors">
                   <div className="row mb-3" style={{ flexWrap: "wrap" }}>
                     <div className="min-w-0" style={{ overflowWrap: "anywhere" }}>
                       <strong className="text-base font-semibold text-slate-900">{item.name}</strong>
-                      <p className="muted text-sm mt-1 mb-0" aria-live="polite">{mediaForContent.length}<T>{" images uploaded"}</T></p>
+                      <p className="muted text-sm mt-1 mb-0" aria-live="polite">{mediaForContent.length - pdfCount}<T>{" images uploaded"}</T>{pdfCount > 0 && <> · {pdfCount}<T>{" PDFs uploaded"}</T></>}</p>
                     </div>
-                    <ActionButton type="button" className="button small" disabled={contentSaving} aria-expanded={detailsOpen}
-                      aria-controls={`content-details-${item.id}`}
+                    <ActionButton type="button" className="button small" disabled={contentSaving || uploadingId !== null || deletingImageId !== null} aria-haspopup="dialog"
                       onClick={() => setDetailId(detailsOpen ? null : item.id)}>
-                      <T>{detailsOpen ? "Hide details" : "Details"}</T>
+                      <T>{"Details"}</T>
                     </ActionButton>
                   </div>
-                  <div id={`content-details-${item.id}`} hidden={!detailsOpen}>
+                  {detailsOpen && <Modal title={<><T>{"Details"}</T>: {item.name}</>} wide onClose={() => setDetailId(null)} busy={contentSaving || uploadingId !== null || deletingImageId !== null}>
                     <div className="buttons" style={{ flexWrap: "wrap" }}>
                       <ActionButton
                         type="button"
@@ -894,7 +875,7 @@ export function ContentPanel({ initialContents, initialMedia = {} }: { initialCo
                         type="button"
                         className="button small danger"
                         disabled={busy || contentSaving || deletingImageId !== null || uploadingId !== null || pendingContentId === item.id}
-                        onClick={() => remove(item.id)}
+                        onClick={() => setDeletingContent(item)}
                         title="Delete content"
                       >
                         <TrashIcon className="w-3 h-3" />
@@ -903,17 +884,6 @@ export function ContentPanel({ initialContents, initialMedia = {} }: { initialCo
                     </div>
 
 
-                  {editingContent?.id === item.id ? (
-                    <ContentEditor key={item.id} content={editingContent}
-                      onClose={() => setEditingContent(null)} onBusyChange={setContentSaving}
-                      onSaved={(updated) => {
-                        setItems((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
-                        setEditingContent(null);
-                        setUploadFeedbackId(item.id);
-                        setError("");
-                        setSuccess("Content updated.");
-                      }} />
-                  ) : (
                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 my-3">
                     <p
                       className="text-slate-800 text-sm m-0 leading-relaxed font-normal"
@@ -931,19 +901,20 @@ export function ContentPanel({ initialContents, initialMedia = {} }: { initialCo
                     )}
                   </div>
 
-                  )}
                   {uploadFeedbackId === item.id && <Feedback error={error} success={success} />}
                   <div className="field my-3">
-                    <label htmlFor={`image-${item.id}`}><T>{"Upload images"}</T></label>
-                    <input id={`image-${item.id}`} type="file" accept="image/jpeg,image/png,image/webp" multiple
+                    <label htmlFor={`image-${item.id}`}><T>{"Upload images or PDFs"}</T></label>
+                    <input id={`image-${item.id}`} type="file" accept={MEDIA_UPLOAD_ACCEPT} multiple
                       disabled={busy || contentSaving || deletingImageId !== null || uploadingId !== null || remainingImages.length > 0 || pendingContentId === item.id}
                       onChange={(event) => { const selected = [...(event.currentTarget.files ?? [])]; event.currentTarget.value = ""; void uploadImages(item.id, selected); }} />
-                    <p className="muted text-xs"><T>{"Choose JPG, PNG, or WebP images."}</T></p>
-                    {uploadingId === item.id && <p role="status"><LoadingDots /><T>{"Uploading images…"}</T> {remainingImages.length}<T>{" remaining"}</T></p>}
+                    <p className="muted text-xs"><T>{"Choose JPG, PNG, WebP, or PDF files."}</T></p>
+                    <p className="muted text-xs"><T>{"PDFs are saved for reference and download. Only images are attached by the posting extension."}</T></p>
+                    <small><T>{"Maximum size per file:"}</T> {maxMegabytes} MB</small>
+                    {uploadingId === item.id && <p role="status"><LoadingDots /><T>{"Uploading files…"}</T> {remainingImages.length}<T>{" files remaining"}</T></p>}
                     {remainingImages.length > 0 && uploadingId !== item.id && <div className="notice">
-                      <p>{remainingImages.length}<T>{" images waiting to upload"}</T></p>
+                      <p>{remainingImages.length}<T>{remainingImages.some((file) => file.type === "application/pdf") ? " files waiting to upload" : " images waiting to upload"}</T></p>
                       <p className="text-sm" style={{ overflowWrap: "anywhere" }}>{remainingImages.map((file) => file.name).join(", ")}</p>
-                      <ActionButton type="button" className="button small" disabled={busy || contentSaving || deletingImageId !== null || uploadingId !== null} onClick={() => uploadImages(item.id, remainingImages)}><T>{"Retry remaining images"}</T></ActionButton>
+                      <ActionButton type="button" className="button small" disabled={busy || contentSaving || deletingImageId !== null || uploadingId !== null} onClick={() => uploadImages(item.id, remainingImages)}><T>{remainingImages.some((file) => file.type === "application/pdf") ? "Retry remaining files" : "Retry remaining images"}</T></ActionButton>
                       <ActionButton type="button" className="button small" disabled={busy || contentSaving || deletingImageId !== null || uploadingId !== null} onClick={() => setPendingImages((current) => ({ ...current, [item.id]: [] }))}><T>{"Clear selection"}</T></ActionButton>
                     </div>}
                   </div>
@@ -952,14 +923,16 @@ export function ContentPanel({ initialContents, initialMedia = {} }: { initialCo
                       <div key={image.id} className="border border-slate-200 rounded-lg overflow-hidden bg-white min-w-0">
                         <a href={`/api/media/${image.id}`} target="_blank" rel="noreferrer">
                         {/* Stored images use the authenticated media endpoint rather than an external image loader. */}
-                        {detailsOpen && <img src={`/api/media/${image.id}`} alt={image.originalFilename} loading="lazy" className="w-full object-contain bg-slate-50" style={{ height: 140 }} />}
+                        {image.mimeType === "application/pdf" ? <div className="pdf-file-preview"><strong>PDF</strong><span><T>{"Open PDF"}</T></span></div>
+                          : detailsOpen && <img src={`/api/media/${image.id}`} alt={image.originalFilename} loading="lazy" className="w-full object-contain bg-slate-50" style={{ height: 140 }} />}
                         <div className="p-2 text-xs" style={{ overflowWrap: "anywhere" }}>{image.originalFilename}<p className="muted m-0">{Math.ceil(image.sizeBytes / 1024)} KB</p></div>
                         </a>
-                        <div className="p-2 pt-0">
+                        <div className="p-2 pt-0 buttons" style={{ flexWrap: "wrap" }}>
+                          {image.mimeType === "application/pdf" && <a className="button small" href={`/api/media/${image.id}?download=1`} download={image.originalFilename}><T>{"Download PDF"}</T></a>}
                           <ActionButton type="button" className="button small danger"
                             disabled={busy || contentSaving || uploadingId !== null || deletingImageId !== null || pendingContentId === item.id}
-                            onClick={() => removeImage(item.id, image)}>
-                            <T>{deletingImageId === image.id ? "Deleting image…" : "Delete image"}</T>
+                            onClick={() => setDeletingMedia({ contentId: item.id, image })}>
+                            <T>{image.mimeType === "application/pdf" ? deletingImageId === image.id ? "Deleting PDF…" : "Delete PDF" : deletingImageId === image.id ? "Deleting image…" : "Delete image"}</T>
                           </ActionButton>
                         </div>
                       </div>
@@ -986,13 +959,29 @@ export function ContentPanel({ initialContents, initialMedia = {} }: { initialCo
                       </div>
                     )}
                   </div>
-                  </div>
+                  </Modal>}
                 </article>
               );
             })}
           </div>
         )}
       </div>
+      {editingContent && <ContentEditor key={editingContent.id} content={editingContent}
+        onClose={() => setEditingContent(null)} onBusyChange={setContentSaving}
+        onSaved={(updated) => {
+          setItems((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
+          setEditingContent(null);
+          setUploadFeedbackId(updated.id);
+          setError("");
+          setSuccess("Content updated.");
+        }} />}
+      {deletingContent && <ConfirmDialog title={<T>{"Delete content"}</T>} onClose={() => setDeletingContent(null)} onConfirm={() => remove(deletingContent.id)}>
+        <strong>{deletingContent.name}</strong><p><T>{"Delete this content from your library?"}</T></p>
+      </ConfirmDialog>}
+      {deletingMedia && <ConfirmDialog title={<T>{deletingMedia.image.mimeType === "application/pdf" ? "Delete PDF" : "Delete image"}</T>}
+        onClose={() => setDeletingMedia(null)} onConfirm={() => removeImage(deletingMedia.contentId, deletingMedia.image)}>
+        <strong>{deletingMedia.image.originalFilename}</strong><p><T>{deletingMedia.image.mimeType === "application/pdf" ? "Delete this PDF from the content?" : "Delete this image from the content?"}</T></p>
+      </ConfirmDialog>}
     </>
   );
 }
@@ -1029,19 +1018,7 @@ function ContentEditor({
   }
 
   return (
-    <div className="panel border-blue-200 shadow-md mt-3">
-      <div className="panel-head bg-blue-50/50">
-        <div className="flex items-center gap-2">
-          <EditIcon className="w-4 h-4 text-blue-600" />
-          <h2>
-            <T>{"Edit content"}</T>
-          </h2>
-        </div>
-        <ActionButton type="button" className="button small" disabled={busy} onClick={onClose}>
-          <CloseIcon className="w-3.5 h-3.5" />
-          <span><T>{"Close"}</T></span>
-        </ActionButton>
-      </div>
+    <Modal title={<T>{"Edit content"}</T>} onClose={onClose} busy={busy}>
       <ActionForm className="form p-5" onSubmit={submit}>
         <fieldset disabled={busy} className="form" style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
         <div className="field">
@@ -1096,7 +1073,7 @@ function ContentEditor({
         </ActionButton>
         </fieldset>
       </ActionForm>
-    </div>
+    </Modal>
   );
 }
 
@@ -1107,6 +1084,9 @@ function VariantEditor({ contentId }: { contentId: string }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editBody, setEditBody] = useState("");
+  const [deleting, setDeleting] = useState<Variant | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -1133,6 +1113,8 @@ function VariantEditor({ contentId }: { contentId: string }) {
   }
 
   async function save(id: string) {
+    setSaving(true);
+    setEditError("");
     try {
       const variant = await request<Variant>(
         `/api/content/${contentId}/variants/${id}`,
@@ -1143,18 +1125,14 @@ function VariantEditor({ contentId }: { contentId: string }) {
       setEditing(null);
       setError("");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to update variant.");
-    }
+      setEditError(cause instanceof Error ? cause.message : "Unable to update variant.");
+    } finally { setSaving(false); }
   }
 
   async function remove(id: string) {
-    try {
-      await request(`/api/content/${contentId}/variants/${id}`, undefined, "DELETE");
-      setVariants((current) => current.filter((item) => item.id !== id));
-      setError("");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to delete variant.");
-    }
+    await request(`/api/content/${contentId}/variants/${id}`, undefined, "DELETE");
+    setVariants((current) => current.filter((item) => item.id !== id));
+    setError("");
   }
 
   return (
@@ -1166,23 +1144,22 @@ function VariantEditor({ contentId }: { contentId: string }) {
       {loading && <LoadingStatus />}
       {variants.map((variant) => (
         <div key={variant.id} className="p-3 bg-white border border-slate-200 rounded-lg">
-          {editing === variant.id ? (
-            <div className="form">
+          {editing === variant.id && <Modal title={<T>{"Edit variant"}</T>} busy={saving} onClose={() => setEditing(null)}>
+            <ActionForm className="form" onSubmit={() => save(variant.id)}>
+              <fieldset disabled={saving} className="form" style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
               <LocalizedInput
-                aria-label="Variant name"
+                required maxLength={120} aria-label="Variant name"
                 value={editName}
                 onChange={(event) => setEditName(event.target.value)}
               />
               <LocalizedTextarea
-                aria-label="Variant caption"
+                required maxLength={10000} aria-label="Variant caption"
                 value={editBody}
                 onChange={(event) => setEditBody(event.target.value)}
               />
               <div className="buttons">
                 <ActionButton
-                  type="button"
                   className="button small primary"
-                  onClick={() => save(variant.id)}
                 >
                   <T>{"Save variant"}</T>
                 </ActionButton>
@@ -1194,8 +1171,10 @@ function VariantEditor({ contentId }: { contentId: string }) {
                   <T>{"Cancel"}</T>
                 </ActionButton>
               </div>
-            </div>
-          ) : (
+              </fieldset>
+              {editError && <p className="error" role="alert"><T>{editError}</T></p>}
+            </ActionForm>
+          </Modal>}
             <>
               <div className="row mb-2">
                 <strong className="text-sm font-semibold text-slate-900">{variant.name}</strong>
@@ -1204,6 +1183,7 @@ function VariantEditor({ contentId }: { contentId: string }) {
                     type="button"
                     className="button small"
                     onClick={() => {
+                      setEditError("");
                       setEditing(variant.id);
                       setEditName(variant.name);
                       setEditBody(variant.body);
@@ -1214,7 +1194,7 @@ function VariantEditor({ contentId }: { contentId: string }) {
                   <ActionButton
                     type="button"
                     className="button small danger"
-                    onClick={() => remove(variant.id)}
+                    onClick={() => setDeleting(variant)}
                   >
                     <T>{"Delete"}</T>
                   </ActionButton>
@@ -1224,9 +1204,12 @@ function VariantEditor({ contentId }: { contentId: string }) {
                 {variant.body}
               </p>
             </>
-          )}
         </div>
       ))}
+
+      {deleting && <ConfirmDialog title={<T>{"Delete variant"}</T>} onClose={() => setDeleting(null)} onConfirm={() => remove(deleting.id)}>
+        <strong>{deleting.name}</strong><p><T>{"Delete this content variant?"}</T></p>
+      </ConfirmDialog>}
 
       <ActionForm className="form pt-2" onSubmit={add}>
         <div className="two-col">
@@ -1285,6 +1268,26 @@ export function CampaignsPanel({
   const [items, setItems] = useState(initialCampaigns);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [isCreating, setIsCreating] = useState(initialCampaigns.length === 0);
+  const [createdId, setCreatedId] = useState("");
+  const feedbackRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (success || error) feedbackRef.current?.focus();
+  }, [success, error, createdId]);
+
+  function clearNewHash() {
+    if (window.location.hash === "#new") window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search);
+  }
+
+  useEffect(() => {
+    function openFromLink() {
+      if (window.location.hash === "#new") setIsCreating(true);
+    }
+    openFromLink();
+    window.addEventListener("hashchange", openFromLink);
+    return () => window.removeEventListener("hashchange", openFromLink);
+  }, []);
 
   function created(campaign: Campaign["campaign"]) {
     setItems((current) => [
@@ -1295,9 +1298,16 @@ export function CampaignsPanel({
       ...current,
     ]);
     setSuccess("Campaign created. Start it when you're ready to build the queue.");
+    setError("");
+    setCreatedId(campaign.id);
+    setIsCreating(false);
+    clearNewHash();
   }
 
   async function start(id: string) {
+    setError("");
+    setSuccess("");
+    setCreatedId(id);
     try {
       await request(`/api/campaigns/${id}/start`, {});
       setItems((current) =>
@@ -1307,7 +1317,7 @@ export function CampaignsPanel({
             : entry
         )
       );
-      setSuccess("Campaign started. Its first job is now available to the extension.");
+      setSuccess("Campaign started. Open the extension to prepare posts when they are due.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to start campaign.");
     }
@@ -1315,50 +1325,49 @@ export function CampaignsPanel({
 
   return (
     <>
-      <div className="panel">
+      <div id="new" className="workspace-toolbar">
+        <p className="muted"><T>{"Prepare your post, choose groups, then set the schedule."}</T></p>
+        <button type="button" className="button primary" aria-expanded={isCreating} aria-controls="campaign-composer"
+          onClick={() => { if (isCreating) clearNewHash(); setIsCreating((current) => !current); setError(""); setSuccess(""); }}>
+          <T>{isCreating ? "Hide campaign form" : "New campaign"}</T>
+        </button>
+      </div>
+      {(error || success) && <div ref={feedbackRef} id="campaign-feedback" className="campaign-feedback" tabIndex={-1}>
+        <Feedback error={error} success={success} />
+        {success && <div className="buttons">
+          {createdId && <Link className="button small primary" href={`/campaigns/${createdId}`}><T>{"Open campaign"}</T></Link>}
+          <Link className="button small" href="/queue"><T>{"View queue"}</T></Link>
+          <Link className="button small" href="/settings#extension"><T>{"Connect Chrome Extension"}</T></Link>
+        </div>}
+      </div>}
+      <div id="campaign-composer" className="panel" hidden={!isCreating}>
         <div className="panel-head">
-          <div className="flex items-center gap-2">
-            <CampaignIcon className="w-4 h-4 text-blue-600" />
-            <h2>
-              <T>{"New campaign"}</T>
-            </h2>
-          </div>
+          <h2><T>{"New campaign"}</T></h2>
+          <span className="badge blue"><T>{"3 simple steps"}</T></span>
         </div>
 
         {contents.length === 0 || groups.filter((group) => group.status === "ACTIVE").length === 0 ? (
           <div className="empty">
-            <div className="w-12 h-12 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center mb-3">
-              <CampaignIcon className="w-6 h-6 text-slate-400" />
-            </div>
             <strong>
               <T>{"Campaigns need content and groups."}</T>
             </strong>
             <p className="max-w-md text-sm text-slate-500 m-0">
               <T>{"Add at least one saved caption and one active group first."}</T>
             </p>
+            <div className="setup-actions">
+              <Link href="/content" className={`button${contents.length === 0 ? " primary" : ""}`}><T>{contents.length === 0 ? "Create reusable content" : "Manage content"}</T></Link>
+              <Link href="/groups" className={`button${contents.length > 0 ? " primary" : ""}`}><T>{"Add a Facebook Group"}</T></Link>
+            </div>
           </div>
         ) : (
           <CampaignWizard groups={groups} contents={contents} onCreated={created} />
         )}
 
-        {error && (
-          <p className="error m-5" role="alert">
-            <AlertCircleIcon className="w-4 h-4 flex-shrink-0" />
-            <span><T>{error}</T></span>
-          </p>
-        )}
-        {success && (
-          <div className="notice m-5" role="status">
-            <CheckIcon className="w-4 h-4 flex-shrink-0" />
-            <span><T>{success}</T></span>
-          </div>
-        )}
       </div>
 
       <div className="panel">
         <div className="panel-head">
           <div className="flex items-center gap-2">
-            <CampaignIcon className="w-4 h-4 text-slate-600" />
             <h2>
               <T>{"Campaigns"}</T>
             </h2>
@@ -1371,9 +1380,6 @@ export function CampaignsPanel({
 
         {items.length === 0 ? (
           <div className="empty">
-            <div className="w-12 h-12 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center mb-3">
-              <CampaignIcon className="w-6 h-6 text-slate-400" />
-            </div>
             <strong>
               <T>{"No campaigns yet."}</T>
             </strong>
@@ -1407,12 +1413,12 @@ export function CampaignsPanel({
                 {items.map(({ campaign, contentName }) => (
                   <tr key={campaign.id}>
                     <td>
-                      <a
+                      <Link
                         href={`/campaigns/${campaign.id}`}
                         className="text-blue-600 hover:text-blue-700 font-semibold"
                       >
                         {campaign.name}
-                      </a>
+                      </Link>
                     </td>
                     <td className="text-slate-600">{contentName}</td>
                     <td>
@@ -1434,20 +1440,19 @@ export function CampaignsPanel({
                     </td>
                     <td>
                       <div className="flex items-center justify-end gap-2">
-                        <DeleteCampaignButton id={campaign.id} name={campaign.name} disabled={campaign.status === "RUNNING"} onDeleted={() => { setItems((current) => current.filter((entry) => entry.campaign.id !== campaign.id)); setSuccess("Campaign deleted."); }} />
+                        <DeleteCampaignButton id={campaign.id} name={campaign.name} disabled={campaign.status === "RUNNING"} onDeleted={() => { setItems((current) => current.filter((entry) => entry.campaign.id !== campaign.id)); setCreatedId(""); setSuccess("Campaign deleted."); }} />
                         {campaign.status === "READY" ? (
                           <ActionButton
                             type="button"
                             className="button small primary"
                             onClick={() => start(campaign.id)}
                           >
-                            <PlayIcon className="w-3 h-3" />
                             <span><T>{"Start"}</T></span>
                           </ActionButton>
                         ) : (
-                          <a href={`/campaigns/${campaign.id}`} className="button small">
+                          <Link href={`/campaigns/${campaign.id}`} className="button small">
                             <T>{"Details"}</T>
-                          </a>
+                          </Link>
                         )}
                       </div>
                     </td>

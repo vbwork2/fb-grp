@@ -3,7 +3,7 @@ import { hashPassword, validatePassword, verifyPassword } from "../src/lib/secur
 import { assertQueueTransition } from "../src/lib/services/queue-state-machine";
 import { buildQueuePlan } from "../src/lib/services/queue-plan";
 import { isFacebookGroupUrl, normalizeFacebookGroupUrl } from "../src/lib/validators/facebook";
-import { validateImageUpload } from "../src/lib/validators/media";
+import { mediaContentDisposition, validateImageUpload, validateMediaUpload } from "../src/lib/validators/media";
 import { createOpaqueToken, hashOpaqueToken } from "../src/lib/security/tokens";
 
 describe("password security", () => {
@@ -39,6 +39,30 @@ describe("media upload validation", () => {
     expect(validateImageUpload(png, "image/png", "sample.png", 2048, 1024)).toBe(false);
     expect(validateImageUpload(png, "image/jpeg", "sample.jpg", png.length, 1024)).toBe(false);
     expect(validateImageUpload(png, "image/png", "sample.jpg", png.length, 1024)).toBe(false);
+  });
+  it("accepts PDF headers and end markers with a matching MIME, extension and size", () => {
+    for (const version of ["1.4", "1.7", "2.0"]) {
+      const pdf = new TextEncoder().encode(`%PDF-${version}\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n`);
+      expect(validateMediaUpload(pdf, "application/pdf", "Tài liệu.PDF", pdf.length, 1024)).toBe(true);
+      expect(validateImageUpload(pdf, "application/pdf", "document.pdf", pdf.length, 1024)).toBe(false);
+      expect(validateMediaUpload(pdf, "application/pdf", "document.png", pdf.length, 1024)).toBe(false);
+      expect(validateMediaUpload(pdf, "application/pdf", "document.pdf", pdf.length, pdf.length - 1)).toBe(false);
+      expect(validateMediaUpload(pdf, "application/pdf", "document.pdf", 0, 1024)).toBe(false);
+    }
+  });
+  it("rejects fake PDFs, truncated documents and images renamed as PDFs", () => {
+    for (const text of ["not a PDF", "%PDF-1.7\nno end marker", "%PDF-9.9\n%%EOF", "<html>%PDF-1.7\n%%EOF"]) {
+      const bytes = new TextEncoder().encode(text);
+      expect(validateMediaUpload(bytes, "application/pdf", "fake.pdf", bytes.length, 1024)).toBe(false);
+    }
+    expect(validateMediaUpload(png, "application/pdf", "fake.pdf", png.length, 1024)).toBe(false);
+  });
+  it("encodes Unicode download filenames without allowing response-header injection", () => {
+    const header = mediaContentDisposition('Bảng giá "2026"\r\nX-Test: injected.pdf', true);
+    expect(header).toContain('attachment; filename="document.pdf"; filename*=UTF-8\'\'');
+    expect(header).toContain("B%E1%BA%A3ng%20gi%C3%A1");
+    expect(header).not.toMatch(/[\r\n]/);
+    expect(mediaContentDisposition("notes.pdf", false)).toMatch(/^inline;/);
   });
 });
 
