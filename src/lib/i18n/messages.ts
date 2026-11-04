@@ -1,4 +1,10 @@
 export const vietnamese: Record<string, string> = {
+  "Workspace sidebar": "Thanh điều hướng không gian làm việc",
+  "Groupflow Dashboard": "Tổng quan Groupflow",
+  "Expand sidebar": "Mở rộng thanh bên",
+  "Collapse sidebar": "Thu gọn thanh bên",
+  "Expand": "Mở rộng",
+  "Collapse": "Thu gọn",
   "Delete group": "Xóa nhóm",
   "Delete content": "Xóa nội dung",
   "Revoke device access": "Thu hồi quyền truy cập thiết bị",

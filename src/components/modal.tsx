@@ -17,6 +17,9 @@ export function Modal({ open = true, title, onClose, busy = false, wide = false,
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleId = useId();
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -30,18 +33,38 @@ export function Modal({ open = true, title, onClose, busy = false, wide = false,
     dialog.showModal();
     dialog.querySelector<HTMLElement>("[data-modal-initial-focus]")?.focus();
     return () => {
+      if (closeTimer.current) clearTimeout(closeTimer.current);
       dialog.close();
       if (--openModals === 0) document.body.style.overflow = previousOverflow;
       if (trigger instanceof HTMLElement && trigger.isConnected) trigger.focus();
     };
   }, [open]);
 
+  function finishClose() {
+    if (!closingRef.current) return;
+    closingRef.current = false;
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    onClose();
+  }
+
   function dismiss() {
-    if (!busy && !dialogRef.current?.querySelector('form[aria-busy="true"]')) onClose();
+    if (busy || closingRef.current || dialogRef.current?.querySelector('form[aria-busy="true"]')) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      onClose();
+      return;
+    }
+    closingRef.current = true;
+    setClosing(true);
+    // Complete dismissal even when custom styles prevent the animation event.
+    closeTimer.current = setTimeout(finishClose, 240);
   }
 
   return <dialog ref={dialogRef} aria-labelledby={titleId} aria-modal="true"
+    data-closing={closing} inert={closing}
     className={`workspace-modal${wide ? " workspace-modal-wide" : ""}`}
+    onAnimationEnd={(event) => {
+      if (event.target === event.currentTarget && event.animationName === "workspace-modal-out") finishClose();
+    }}
     onCancel={(event) => { event.preventDefault(); event.stopPropagation(); dismiss(); }}
     onClick={(event) => {
       if (event.target !== event.currentTarget) return;
@@ -50,7 +73,7 @@ export function Modal({ open = true, title, onClose, busy = false, wide = false,
     }}>
     <div className="workspace-modal-head">
       <h2 id={titleId}>{title}</h2>
-      <button type="button" className="button small" disabled={busy} onClick={dismiss}><T>{"Close"}</T></button>
+      <button type="button" className="button small" disabled={busy || closing} onClick={dismiss}><T>{"Close"}</T></button>
     </div>
     <div className="workspace-modal-body">{children}</div>
   </dialog>;

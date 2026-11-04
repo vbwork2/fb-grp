@@ -1,5 +1,9 @@
 # Posting workflow
 
+The desktop sidebar stays fixed while the workspace scrolls. Collapse switches to compact text navigation and gives the page more room; Expand restores the full sidebar. The preference is stored in the `groupflow_sidebar` cookie and restored on reload. On mobile, the navigation stays at the top and can be collapsed to leave more room for content.
+
+Sidebar resizing, popup entrance and dismissal, campaign steps, button presses and feedback use short animations. The interface disables these animations when the operating system requests reduced motion. Saving and deletion still wait for the server response, and active requests continue to block conflicting actions.
+
 ```mermaid
 sequenceDiagram
 participant U as User

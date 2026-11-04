@@ -139,7 +139,7 @@ export function CampaignWizard({ groups, contents, onCreated }: {
             <h3 ref={heading} tabIndex={-1}><T>{steps[step - 1]}</T></h3>
             <p className="muted"><T>{descriptions[step - 1]}</T></p>
           </div>
-          <fieldset disabled={busy} className="wizard-fields form">
+          <fieldset key={step} disabled={busy} className="wizard-fields form workspace-step-enter">
             {step === 1 && <>
               <div className="field">
                 <label htmlFor="wizardCampaignName"><T>{"Campaign name"}</T></label>

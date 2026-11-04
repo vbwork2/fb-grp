@@ -954,7 +954,7 @@ export function ContentPanel({ initialContents, initialMedia = {}, maxUploadMega
                       <T>{expanded ? "Hide content variants" : "Show content variants"}</T>
                     </ActionButton>
                     {expanded && (
-                      <div id={`variants-${item.id}`} className="mt-3">
+                      <div id={`variants-${item.id}`} className="mt-3 workspace-reveal">
                         <VariantEditor contentId={item.id} />
                       </div>
                     )}
@@ -1340,7 +1340,7 @@ export function CampaignsPanel({
           <Link className="button small" href="/settings#extension"><T>{"Connect Chrome Extension"}</T></Link>
         </div>}
       </div>}
-      <div id="campaign-composer" className="panel" hidden={!isCreating}>
+      <div id="campaign-composer" className="panel workspace-reveal" hidden={!isCreating}>
         <div className="panel-head">
           <h2><T>{"New campaign"}</T></h2>
           <span className="badge blue"><T>{"3 simple steps"}</T></span>

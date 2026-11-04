@@ -196,3 +196,29 @@ test("saving a group prevents dismissal until the request finishes", async ({ pa
   await editor.getByRole("button", { name: "Close", exact: true }).click();
   await expect(editor).toHaveCount(0);
 });
+
+
+test("popup entrance and dismissal animate while preserving focus restoration", async ({ page }) => {
+  await mount(page);
+  const trigger = row(page, "Alpha").getByRole("button", { name: "Edit", exact: true });
+  await trigger.click();
+  const editor = page.getByRole("dialog", { name: "Edit group", exact: true });
+  await expect(editor).toHaveCSS("animation-name", "workspace-modal-in");
+  await expect(editor).toHaveCSS("animation-duration", "0.2s");
+  await editor.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(page.locator("dialog")).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("");
+});
+
+test("reduced motion removes popup animations and still closes with Escape", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await mount(page);
+  const trigger = row(page, "Alpha").getByRole("button", { name: "Edit", exact: true });
+  await trigger.click();
+  const editor = page.getByRole("dialog", { name: "Edit group", exact: true });
+  await expect(editor).toHaveCSS("animation-name", "none");
+  await page.keyboard.press("Escape");
+  await expect(page.locator("dialog")).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+});

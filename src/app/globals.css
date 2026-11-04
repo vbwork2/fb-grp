@@ -143,6 +143,9 @@
   --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.07), 0 1px 2px -1px rgb(0 0 0 / 0.07);
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.07);
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.08);
+  --motion-fast: 120ms;
+  --motion-normal: 200ms;
+  --motion-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
 * {
@@ -176,22 +179,25 @@ button {
 
 /* Base App Shell */
 .app {
+  --sidebar-width: 260px;
   display: flex;
   min-height: 100vh;
   background-color: var(--bg);
 }
 
 .sidebar {
-  width: 260px;
+  width: var(--sidebar-width);
   background: #ffffff;
   border-right: 1px solid var(--line);
   padding: 24px 16px;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  transition: width 200ms ease;
-  position: sticky;
+  transition: width var(--motion-normal) var(--motion-ease), padding var(--motion-normal) var(--motion-ease);
+  position: fixed;
   top: 0;
+  left: 0;
+  z-index: 30;
   height: 100dvh;
   overflow-y: auto;
 }
@@ -268,6 +274,8 @@ button {
 }
 
 .main {
+  margin-left: var(--sidebar-width);
+  transition: margin-left var(--motion-normal) var(--motion-ease);
   min-width: 0;
   flex: 1;
   display: flex;
@@ -862,8 +870,8 @@ tr:hover td {
 
 /* Responsive Breakpoints */
 @media (max-width: 1024px) {
-  .sidebar {
-    width: 220px;
+  .app {
+    --sidebar-width: 220px;
   }
   .content {
     padding: 24px 24px 48px;
@@ -879,7 +887,7 @@ tr:hover td {
     width: 100%;
     height: auto;
     padding: 14px 18px;
-    position: static;
+    position: sticky;
     top: 0;
     z-index: 30;
     border-right: 0;
@@ -891,6 +899,10 @@ tr:hover td {
   
   .brand {
     padding: 0 4px 12px;
+  }
+
+  .main {
+    margin-left: 0;
   }
   
   .nav-label,
@@ -1110,6 +1122,53 @@ button.text-action:hover { text-decoration: underline; }
   .wizard-steps { gap: 4px; padding: 12px; }
   .topbar-account { gap: 0; }
 }
+/* The compact sidebar keeps text navigation available without icons. */
+.app:has(> .sidebar[data-collapsed="true"]) { --sidebar-width: 112px; }
+.sidebar-header { position: sticky; top: 0; z-index: 1; display: grid; gap: 16px; padding-bottom: 20px; background: var(--surface); }
+.sidebar-header .brand { padding: 0 12px; min-height: 28px; }
+.sidebar-toggle { width: 100%; }
+.sidebar-content { display: flex; flex: 1; flex-direction: column; }
+.sidebar-foot { display: flex; align-items: center; gap: 10px; }
+.sidebar-avatar { display: grid; place-items: center; width: 32px; height: 32px; flex-shrink: 0; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg); color: var(--ink-secondary); font-weight: 700; }
+.sidebar-user-copy { min-width: 0; }
+.sidebar[data-collapsed="true"] { padding-inline: 10px; }
+.sidebar[data-collapsed="true"] .sidebar-header .brand { padding-inline: 0; justify-content: center; font-size: 16px; }
+.sidebar[data-collapsed="true"] .nav-label,
+.sidebar[data-collapsed="true"] .sidebar-help,
+.sidebar[data-collapsed="true"] .sidebar-user-copy { display: none; }
+.sidebar[data-collapsed="true"] .nav a { justify-content: center; min-height: 44px; padding: 10px 4px; font-size: 12px; text-align: center; overflow-wrap: anywhere; }
+.sidebar[data-collapsed="true"] .sidebar-foot { justify-content: center; padding-inline: 0; margin-top: 24px; }
+
+/* Motion communicates interaction changes without delaying network requests. */
+.button { transition: background-color var(--motion-fast) ease, border-color var(--motion-fast) ease, color var(--motion-fast) ease, box-shadow var(--motion-fast) ease, transform var(--motion-fast) var(--motion-ease); }
+.button:enabled:active, a.button:active { transform: scale(0.97); }
+.nav a, .selection-toggle, .wizard-steps button, .group-picker label { transition: background-color var(--motion-fast) ease, border-color var(--motion-fast) ease, color var(--motion-fast) ease, box-shadow var(--motion-fast) ease; }
+.field input, .field select, .field textarea { transition: border-color var(--motion-fast) ease, box-shadow var(--motion-fast) ease; }
+.workspace-modal[open] { animation: workspace-modal-in var(--motion-normal) var(--motion-ease) both; }
+.workspace-modal[open]::backdrop { animation: workspace-scrim-in var(--motion-normal) ease both; }
+.workspace-modal[data-closing="true"] { animation: workspace-modal-out var(--motion-fast) ease-in both; }
+.workspace-modal[data-closing="true"]::backdrop { animation: workspace-scrim-out var(--motion-fast) ease-in both; }
+.workspace-step-enter, .workspace-reveal:not([hidden]) { animation: workspace-content-in var(--motion-normal) var(--motion-ease) both; }
+.notice[role="status"], .error[role="alert"], .campaign-feedback { animation: workspace-content-in var(--motion-normal) var(--motion-ease) both; }
+@keyframes workspace-modal-in { from { opacity: 0; transform: translateY(10px) scale(0.985); } to { opacity: 1; transform: none; } }
+@keyframes workspace-modal-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(6px) scale(0.985); } }
+@keyframes workspace-scrim-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes workspace-scrim-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes workspace-content-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+
+@media (max-width: 768px) {
+  .sidebar, .sidebar[data-collapsed="true"] { width: 100%; max-height: 50dvh; padding: 12px 16px; overflow-y: auto; transition: none; }
+  .sidebar-header { position: static; display: flex; align-items: center; justify-content: space-between; padding-bottom: 12px; }
+  .sidebar-header .brand, .sidebar[data-collapsed="true"] .sidebar-header .brand { padding: 0; font-size: 18px; }
+  .sidebar-toggle { width: auto; min-height: 44px; }
+  .sidebar .sidebar-foot { display: none; }
+  .sidebar[data-collapsed="true"] .sidebar-header { padding-bottom: 0; }
+  .sidebar[data-collapsed="true"] .sidebar-content { display: none; }
+  .sidebar[data-collapsed="false"] .sidebar-content { animation: workspace-content-in var(--motion-normal) var(--motion-ease) both; }
+  .main { margin-left: 0; transition: none; }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0s !important; }
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0s !important; animation: none !important; }
+  .button:active { transform: none; }
 }

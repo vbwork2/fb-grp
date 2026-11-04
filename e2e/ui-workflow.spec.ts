@@ -11,7 +11,8 @@ test.beforeAll(async () => {
       import { createRoot } from "react-dom/client";
       import { LanguageProvider, LanguagePickerSlot, T } from "./src/components/language-provider";
       import { CampaignsPanel } from "./src/components/workspace-panel";
-      import { AppNav, WorkspaceBreadcrumb } from "./src/components/app-nav";
+      import { WorkspaceBreadcrumb } from "./src/components/app-nav";
+      import { AppSidebar } from "./src/components/app-sidebar";
       import { WorkflowOverview } from "./src/components/workflow-overview";
       const groups = ["Alpha", "Beta", "Gamma", "Paused"].map((name, index) => ({
         id: "group-" + index, name, facebookUrl: "https://www.facebook.com/groups/fixture-" + index,
@@ -21,7 +22,7 @@ test.beforeAll(async () => {
       const saved = { campaign: { id: "saved", contentId: "content", name: "Saved campaign", status: "READY", minIntervalSeconds: 2, maxIntervalSeconds: 2, createdAt: "2026-11-01" }, contentName: "Weekly update" };
       const fixture = new URLSearchParams(location.search).get("fixture");
       createRoot(document.getElementById("root")).render(<LanguageProvider initialLocale="en">
-        <div className="app"><aside className="sidebar"><a href="/dashboard" className="brand">groupflow</a><AppNav /></aside>
+        <div className="app"><AppSidebar initialCollapsed={document.cookie.split(";").some((entry) => entry.trim() === "groupflow_sidebar=collapsed")} name="Demo user" initial="D" />
         <div className="main"><header className="topbar"><WorkspaceBreadcrumb /><div className="topbar-account"><LanguagePickerSlot /><button className="button"><T>Sign out</T></button></div></header><main className="content">
           <div className="page-head"><div><div className="eyebrow"><T>Planning</T></div><h1><T>Campaigns</T></h1><p><T>Build a queue across selected groups, then start it when ready.</T></p></div></div>
           {fixture === "overview" ? <WorkflowOverview hasContent={true} hasGroups={false} hasDevice={false} /> : <CampaignsPanel initialCampaigns={fixture === "saved" ? [saved] : []} groups={fixture === "empty" ? [] : groups} contents={fixture === "empty" ? [] : contents} />}
@@ -191,4 +192,73 @@ test("Vietnamese workflow stays usable on phone and desktop without horizontal o
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: "test-results/ui-workflow-desktop.png", fullPage: true });
+});
+
+
+test("desktop sidebar stays fixed and collapse expands the usable workspace", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mount(page, "saved");
+  const sidebar = page.locator(".sidebar");
+  await expect(sidebar).toHaveCSS("position", "fixed");
+  await page.locator(".content").evaluate((element) => { (element as HTMLElement).style.minHeight = "2400px"; });
+  await page.evaluate(() => window.scrollTo(0, 800));
+  expect((await sidebar.boundingBox())!.y).toBe(0);
+  await page.getByRole("button", { name: "Collapse sidebar", exact: true }).click();
+  await expect.poll(async () => Math.round((await sidebar.boundingBox())!.width)).toBe(112);
+  await expect.poll(async () => Math.round((await page.locator(".main").boundingBox())!.x)).toBe(112);
+  await expect(page.getByRole("button", { name: "Expand sidebar", exact: true })).toHaveAttribute("aria-expanded", "false");
+  await expect(sidebar.getByRole("link", { name: "Campaigns", exact: true })).toBeVisible();
+  await expect(sidebar.getByRole("link", { name: "Settings", exact: true })).toBeVisible();
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ animations: "disabled", path: "test-results/sidebar-collapsed-desktop.png" });
+  await page.getByRole("button", { name: "Expand sidebar", exact: true }).click();
+  await expect.poll(async () => Math.round((await sidebar.boundingBox())!.width)).toBe(260);
+  await expect.poll(async () => Math.round((await page.locator(".main").boundingBox())!.x)).toBe(260);
+  await page.screenshot({ animations: "disabled", path: "test-results/sidebar-expanded-desktop.png" });
+});
+
+test("sidebar preference survives reload and keyboard toggling keeps focus", async ({ page }) => {
+  await mount(page, "saved");
+  const toggle = page.getByRole("button", { name: "Collapse sidebar", exact: true });
+  await toggle.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("button", { name: "Expand sidebar", exact: true })).toBeFocused();
+  expect((await page.context().cookies()).find((cookie) => cookie.name === "groupflow_sidebar")?.value).toBe("collapsed");
+  await mount(page, "saved");
+  await expect(page.locator(".sidebar")).toHaveAttribute("data-collapsed", "true");
+  await page.getByRole("button", { name: "Expand sidebar", exact: true }).click();
+  await mount(page, "saved");
+  await expect(page.locator(".sidebar")).toHaveAttribute("data-collapsed", "false");
+});
+
+test("mobile navigation collapses without overflow and can always be reopened", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await mount(page, "saved");
+  await page.locator("#app-language").selectOption("vi");
+  await page.getByRole("button", { name: "Thu gọn thanh bên", exact: true }).click();
+  await expect(page.locator("#workspace-sidebar-content")).toBeHidden();
+  await expect(page.getByRole("button", { name: "Mở rộng thanh bên", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.locator(".content").evaluate((element) => { (element as HTMLElement).style.minHeight = "2400px"; });
+  await page.evaluate(() => window.scrollTo(0, 700));
+  expect((await page.locator(".sidebar").boundingBox())!.y).toBe(0);
+  await page.getByRole("button", { name: "Mở rộng thanh bên", exact: true }).click();
+  await expect(page.getByRole("navigation", { name: "Điều hướng chính", exact: true })).toBeVisible();
+  await expect(page.locator(".sidebar-content")).toHaveCSS("opacity", "1");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ animations: "disabled", path: "test-results/sidebar-mobile.png" });
+});
+
+test("reduced motion removes transitions and step animation without losing the draft", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await mount(page);
+  await page.getByRole("button", { name: "Collapse sidebar", exact: true }).click();
+  await expect(page.locator(".sidebar")).toHaveCSS("transition-duration", "0s");
+  await expect(page.locator(".main")).toHaveCSS("transition-duration", "0s");
+  await page.locator("#wizardCampaignName").fill("Motion preference");
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(page.locator(".workspace-step-enter")).toHaveCSS("animation-name", "none");
+  await page.locator(".wizard-steps").getByRole("button", { name: "1 Campaign & Content", exact: true }).click();
+  await expect(page.locator("#wizardCampaignName")).toHaveValue("Motion preference");
 });
